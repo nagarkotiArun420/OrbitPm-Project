@@ -20,6 +20,7 @@ const Register = () => {
     const result = await register(
       values.email,
       values.password,
+      values.confirm_password,
       values.full_name,
       values.role,
       values.phone_number
@@ -142,12 +143,44 @@ const Register = () => {
           name="password"
           rules={[
             { required: true, message: 'Please input your password!' },
-            { min: 6, message: 'Password must be at least 6 characters!' },
+            { min: 8, message: 'Password must be at least 8 characters!' },
+            {
+              pattern: /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*(),.?":{}|<>]).*$/,
+              message: 'Password must contain uppercase, lowercase, number, and special character!',
+            }
           ]}
         >
           <Input.Password
             prefix={<LockOutlined style={{ color: '#94a3b8' }} />}
             placeholder="Password"
+            size="large"
+            style={{
+              background: 'rgba(255, 255, 255, 0.05)',
+              border: '1px solid rgba(255, 255, 255, 0.1)',
+              color: '#ffffff',
+              borderRadius: '8px',
+            }}
+          />
+        </Form.Item>
+
+        <Form.Item
+          name="confirm_password"
+          dependencies={['password']}
+          rules={[
+            { required: true, message: 'Please confirm your password!' },
+            ({ getFieldValue }) => ({
+              validator(_, value) {
+                if (!value || getFieldValue('password') === value) {
+                  return Promise.resolve();
+                }
+                return Promise.reject(new Error('Passwords do not match!'));
+              },
+            }),
+          ]}
+        >
+          <Input.Password
+            prefix={<LockOutlined style={{ color: '#94a3b8' }} />}
+            placeholder="Confirm Password"
             size="large"
             style={{
               background: 'rgba(255, 255, 255, 0.05)',

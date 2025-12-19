@@ -99,12 +99,13 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const register = async (email, password, fullName, role, phoneNumber) => {
+  const register = async (email, password, confirmPassword, fullName, role, phoneNumber) => {
     setLoading(true);
     try {
       const response = await axios.post(`${API_URL}/auth/register/`, {
         email,
         password,
+        confirm_password: confirmPassword,
         full_name: fullName,
         role,
         phone_number: phoneNumber
@@ -118,7 +119,15 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const logout = () => {
+  const logout = async () => {
+    const refresh = localStorage.getItem('refreshToken');
+    if (refresh) {
+      try {
+        await axios.post(`${API_URL}/auth/logout/`, { refresh });
+      } catch (err) {
+        console.error("Backend token blacklist failed during logout:", err);
+      }
+    }
     localStorage.removeItem('accessToken');
     localStorage.removeItem('refreshToken');
     delete axios.defaults.headers.common['Authorization'];

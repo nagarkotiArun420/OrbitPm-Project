@@ -48,16 +48,17 @@ class User(AbstractBaseUser, PermissionsMixin):
         choices=Roles.choices, 
         default=Roles.DEVELOPER
     )
-    avatar = models.CharField(
-        max_length=500, 
+    avatar = models.ImageField(
+        upload_to='avatars/', 
         null=True, 
         blank=True, 
-        help_text="URL or file path to avatar image"
+        help_text="User avatar image upload"
     )
     phone_number = models.CharField(max_length=20, null=True, blank=True)
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)  # Admin portal access
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     objects = UserManager()
 

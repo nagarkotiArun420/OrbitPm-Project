@@ -1,6 +1,10 @@
-from django.contrib.auth import get_user_model
+import re
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from django.contrib.auth import get_user_model
+from accounts.services import create_user_profile
 
 User = get_user_model()
 
@@ -8,31 +12,66 @@ class UserSerializer(serializers.ModelSerializer):
     """
     Standard serializer for User model.
     """
+    avatar = serializers.ImageField(required=False, allow_null=True)
+
     class Meta:
         model = User
-        fields = ('id', 'email', 'full_name', 'role', 'avatar', 'phone_number', 'created_at')
-        read_only_fields = ('id', 'created_at')
+        fields = ('id', 'email', 'full_name', 'role', 'avatar', 'phone_number', 'created_at', 'updated_at')
+        read_only_fields = ('id', 'created_at', 'updated_at')
 
 class RegisterSerializer(serializers.ModelSerializer):
     """
     Serializer for user registration.
     """
     password = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
+    confirm_password = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
 
     class Meta:
         model = User
-        fields = ('email', 'full_name', 'password', 'role', 'phone_number')
+        fields = ('email', 'full_name', 'password', 'confirm_password', 'role', 'phone_number')
 
     def validate_email(self, value):
         if User.objects.filter(email=value.lower()).exists():
             raise serializers.ValidationError("A user with this email already exists.")
         return value.lower()
 
+    def validate(self, data):
+        if data['password'] != data['confirm_password']:
+            raise serializers.ValidationError({"confirm_password": "Passwords do not match."})
+
+        password = data['password']
+        
+        # Strong password validation (length, uppercase, lowercase, numbers, special character)
+        if len(password) < 8:
+            raise serializers.ValidationError({"password": "Password must be at least 8 characters long."})
+        if not re.search(r"[A-Z]", password):
+            raise serializers.ValidationError({"password": "Password must contain at least one uppercase letter."})
+        if not re.search(r"[a-z]", password):
+            raise serializers.ValidationError({"password": "Password must contain at least one lowercase letter."})
+        if not re.search(r"[0-9]", password):
+            raise serializers.ValidationError({"password": "Password must contain at least one number."})
+        if not re.search(r"[!@#$%^&*(),.?\":{}|<>]", password):
+            raise serializers.ValidationError({"password": "Password must contain at least one special character."})
+
+        # Run django's password validators too
+        try:
+            validate_password(password)
+        except DjangoValidationError as e:
+            raise serializers.ValidationError({"password": list(e.messages)})
+
+        return data
+
     def create(self, validated_data):
+        validated_data.pop('confirm_password')
         password = validated_data.pop('password')
-        user = User.objects.create_user(**validated_data)
-        user.set_password(password)
-        user.save()
+        
+        user = create_user_profile(
+            email=validated_data['email'],
+            password=password,
+            full_name=validated_data['full_name'],
+            role=validated_data.get('role', User.Roles.DEVELOPER),
+            phone_number=validated_data.get('phone_number')
+        )
         return user
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
