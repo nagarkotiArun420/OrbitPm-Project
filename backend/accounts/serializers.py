@@ -93,3 +93,15 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         # Include full user details in the HTTP response body
         data['user'] = UserSerializer(self.user).data
         return data
+
+class UserMinSerializer(serializers.ModelSerializer):
+    """
+    Lightweight, read-only serializer for nested user relations.
+    Excludes sensitive attributes to ensure robust security borders.
+    """
+    avatar = serializers.ImageField(read_only=True)
+
+    class Meta:
+        model = User
+        fields = ('id', 'email', 'full_name', 'role', 'avatar')
+        read_only_fields = fields

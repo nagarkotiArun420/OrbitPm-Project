@@ -1,14 +1,111 @@
 from rest_framework import serializers
 from projects.models import Project
-from accounts.serializers import UserSerializer
+from accounts.serializers import UserMinSerializer
+from django.contrib.auth import get_user_model
 
-class ProjectSerializer(serializers.ModelSerializer):
+User = get_user_model()
+
+class ProjectListSerializer(serializers.ModelSerializer):
     """
-    Serializer for the Project model.
+    Serializer optimized for listing projects.
+    Exposes key metadata along with light nested manager details.
     """
-    owner_details = UserSerializer(source='owner', read_only=True)
+    manager = UserMinSerializer(read_only=True)
 
     class Meta:
         model = Project
-        fields = ('id', 'name', 'description', 'status', 'owner', 'owner_details', 'created_at', 'updated_at')
-        read_only_fields = ('id', 'owner', 'created_at', 'updated_at')
+        fields = ('id', 'title', 'slug', 'status', 'priority', 'deadline', 'manager', 'created_at')
+        read_only_fields = fields
+
+
+class ProjectDetailSerializer(serializers.ModelSerializer):
+    """
+    Serializer providing a complete detailed overview of a project.
+    Expands all relational foreign key user profiles using UserMinSerializer.
+    """
+    manager = UserMinSerializer(read_only=True)
+    client = UserMinSerializer(read_only=True)
+    created_by = UserMinSerializer(read_only=True)
+    team_members = UserMinSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Project
+        fields = (
+            'id', 'title', 'slug', 'description', 'status', 'priority',
+            'start_date', 'deadline', 'completed_at', 'budget',
+            'client', 'manager', 'team_members', 'created_by',
+            'created_at', 'updated_at'
+        )
+        read_only_fields = fields
+
+
+class ProjectCreateSerializer(serializers.ModelSerializer):
+    """
+    Writable serializer for creating new projects with rich API-level validation boundaries.
+    """
+    class Meta:
+        model = Project
+        fields = (
+            'title', 'description', 'status', 'priority',
+            'start_date', 'deadline', 'budget',
+            'client', 'manager', 'team_members'
+        )
+
+    def validate_title(self, value):
+        # Case-insensitive title uniqueness check across active projects
+        queryset = Project.objects.filter(title__iexact=value)
+        if self.instance:
+            queryset = queryset.exclude(pk=self.instance.pk)
+        if queryset.exists():
+            raise serializers.ValidationError("A project with this title already exists.")
+        return value
+
+    def validate_budget(self, value):
+        # Prevent API-level assignment of negative budgets
+        if value is not None and value < 0:
+            raise serializers.ValidationError("Budget cannot be a negative value.")
+        return value
+
+    def validate_manager(self, value):
+        # Ensure user exists and possesses a managerial or admin role
+        if value and value.role not in [User.Roles.MANAGER, User.Roles.ADMIN]:
+            raise serializers.ValidationError("The assigned manager must have the ADMIN or MANAGER role.")
+        return value
+
+    def validate_client(self, value):
+        # Ensure user exists and possesses a client role
+        if value and value.role != User.Roles.CLIENT:
+            raise serializers.ValidationError("The assigned client must have the CLIENT role.")
+        return value
+
+    def validate(self, attrs):
+        start_date = attrs.get('start_date')
+        deadline = attrs.get('deadline')
+        
+        # Verify deadline is equal to or after start_date
+        if start_date and deadline and deadline < start_date:
+            raise serializers.ValidationError({
+                "deadline": "The project deadline cannot be before the start date."
+            })
+        return attrs
+
+
+class ProjectUpdateSerializer(ProjectCreateSerializer):
+    """
+    Writable serializer for updating existing projects.
+    Enforces identical validation rules as creation, with support for PATCH requests.
+    """
+    def validate(self, attrs):
+        # Perform boundary validations taking partial updates (PATCH) into account
+        start_date = attrs.get('start_date') if 'start_date' in attrs else (self.instance.start_date if self.instance else None)
+        deadline = attrs.get('deadline') if 'deadline' in attrs else (self.instance.deadline if self.instance else None)
+        
+        if start_date and deadline and deadline < start_date:
+            raise serializers.ValidationError({
+                "deadline": "The project deadline cannot be before the start date."
+            })
+        return attrs
+
+# Legacy compatibility alias for initial scaffold views (will be fully refactored in views development)
+ProjectSerializer = ProjectDetailSerializer
+
