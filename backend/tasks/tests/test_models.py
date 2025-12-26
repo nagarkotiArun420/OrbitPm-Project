@@ -1,32 +1,204 @@
 from django.test import TestCase
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
+from django.utils import timezone
+from datetime import timedelta
+from decimal import Decimal
 from projects.models import Project
+from projects.constants import ProjectStatus, ProjectPriority
 from tasks.models import Task
+from tasks.constants import TaskStatus, TaskPriority
+from tasks.services import create_task, assign_task_to_user, transition_task_status
 
 User = get_user_model()
 
-class TaskModelTests(TestCase):
+class TaskArchitectureTests(TestCase):
+    """
+    Comprehensive test suite validating Task data architecture,
+    relationships, automated slugs, due date bounds, team assignment guards,
+    and workflow state transition validations.
+    """
     def setUp(self):
-        self.user = User.objects.create_user(
-            email='dev@orbitpm.com',
-            password='password123',
-            full_name='Developer Staff',
-            role=User.Roles.DEVELOPER
+        # Create users
+        self.admin = User.objects.create_user(
+            email='admin@orbitpm.com', password='password123', full_name='Admin Owner', role=User.Roles.ADMIN
         )
-        self.project = Project.objects.create(
-            name='Alpha App',
-            owner=self.user
+        self.manager = User.objects.create_user(
+            email='manager@orbitpm.com', password='password123', full_name='Manager Jack', role=User.Roles.MANAGER
+        )
+        self.developer = User.objects.create_user(
+            email='dev@orbitpm.com', password='password123', full_name='Developer Jill', role=User.Roles.DEVELOPER
+        )
+        self.non_team_user = User.objects.create_user(
+            email='other@orbitpm.com', password='password123', full_name='Other Person', role=User.Roles.DEVELOPER
         )
 
-    def test_create_task_successful(self):
-        task = Task.objects.create(
-            title='Implement JWT',
-            project=self.project,
-            assigned_to=self.user,
-            status=Task.TaskStatus.TODO,
-            priority=Task.TaskPriority.HIGH
+        # Create Project
+        self.project = Project.objects.create(
+            title='Project X Portal',
+            status=ProjectStatus.IN_PROGRESS,
+            priority=ProjectPriority.HIGH,
+            start_date=timezone.localdate() - timedelta(days=5),
+            deadline=timezone.localdate() + timedelta(days=30),
+            manager=self.manager,
+            created_by=self.manager
         )
-        self.assertEqual(task.title, 'Implement JWT')
-        self.assertEqual(task.project, self.project)
-        self.assertEqual(task.assigned_to, self.user)
-        self.assertEqual(task.priority, Task.TaskPriority.HIGH)
+        self.project.team_members.add(self.developer)
+
+    # ==========================================
+    # 1. CORE CREATION & SLUGS
+    # ==========================================
+    def test_task_creation_and_auto_slug(self):
+        task = Task.objects.create(
+            title='Build Auth Middleware',
+            description='Standard JWT authentication setup.',
+            project=self.project,
+            status=TaskStatus.TODO,
+            priority=TaskPriority.HIGH,
+            assigned_by=self.manager
+        )
+        self.assertEqual(task.slug, 'build-auth-middleware')
+        self.assertEqual(str(task), f"{task.title} ({task.status})")
+        self.assertEqual(task.status, TaskStatus.TODO)
+        self.assertIsNone(task.completed_at)
+
+    def test_task_slug_collision_resolves(self):
+        task1 = Task.objects.create(title='Design System', project=self.project)
+        task2 = Task.objects.create(title='Design System', project=self.project)
+        self.assertEqual(task1.slug, 'design-system')
+        self.assertEqual(task2.slug, 'design-system-1')
+
+    # ==========================================
+    # 2. NUMERIC HOUR VALIDATIONS
+    # ==========================================
+    def test_estimated_and_actual_hours_non_negative(self):
+        task = Task(title='Negative Estimations', project=self.project, estimated_hours=Decimal('-5.00'))
+        with self.assertRaises(ValidationError):
+            task.full_clean()
+
+        task2 = Task(title='Negative Actuals', project=self.project, actual_hours=Decimal('-1.50'))
+        with self.assertRaises(ValidationError):
+            task2.full_clean()
+
+    # ==========================================
+    # 3. TIMELINE & DUE DATE VALIDATIONS
+    # ==========================================
+    def test_due_date_aligns_with_project_timeline(self):
+        # Before project start date
+        invalid_due_early = Task(
+            title='Early Due Task',
+            project=self.project,
+            due_date=self.project.start_date - timedelta(days=1)
+        )
+        with self.assertRaises(ValidationError):
+            invalid_due_early.full_clean()
+
+        # After project deadline
+        invalid_due_late = Task(
+            title='Late Due Task',
+            project=self.project,
+            due_date=self.project.deadline + timedelta(days=1)
+        )
+        with self.assertRaises(ValidationError):
+            invalid_due_late.full_clean()
+
+        # Valid due date
+        valid_task = Task(
+            title='Valid Due Task',
+            project=self.project,
+            due_date=self.project.start_date + timedelta(days=5)
+        )
+        valid_task.full_clean()  # Should not raise
+
+    # ==========================================
+    # 4. ASSIGNMENT & TEAM GUARDS
+    # ==========================================
+    def test_assigned_user_must_be_in_project_team(self):
+        # Dev belongs to the team (added as team_member)
+        valid_assignment = Task(
+            title='Valid Dev Assigned',
+            project=self.project,
+            assigned_to=self.developer
+        )
+        valid_assignment.full_clean()  # Should not raise
+
+        # Manager belongs to the team (project.manager)
+        valid_mgr_assignment = Task(
+            title='Valid Manager Assigned',
+            project=self.project,
+            assigned_to=self.manager
+        )
+        valid_mgr_assignment.full_clean()  # Should not raise
+
+        # Non-team user does NOT belong to project team
+        invalid_assignment = Task(
+            title='Invalid User Assigned',
+            project=self.project,
+            assigned_to=self.non_team_user
+        )
+        with self.assertRaises(ValidationError):
+            invalid_assignment.full_clean()
+
+    # ==========================================
+    # 5. AUTOMATED COMPLETION LIFECYCLE
+    # ==========================================
+    def test_completed_status_sets_timestamp(self):
+        task = Task.objects.create(
+            title='Perform API Refactoring',
+            project=self.project,
+            status=TaskStatus.TODO
+        )
+        self.assertIsNone(task.completed_at)
+
+        # Transition to completed
+        task.status = TaskStatus.COMPLETED
+        task.save()
+        self.assertIsNotNone(task.completed_at)
+
+        # Reopen task (transition back to todo)
+        task.status = TaskStatus.TODO
+        task.save()
+        self.assertIsNone(task.completed_at)
+
+    # ==========================================
+    # 6. TRANSACTIONAL SERVICE AND STATE MACHINE
+    # ==========================================
+    def test_create_task_service(self):
+        task = create_task(
+            project=self.project,
+            title='Draft Technical Spec',
+            created_by=self.manager,
+            estimated_hours=Decimal('8.00')
+        )
+        self.assertEqual(task.title, 'Draft Technical Spec')
+        self.assertEqual(task.assigned_by, self.manager)
+
+    def test_assign_task_service(self):
+        task = Task.objects.create(title='Code Review Tasks', project=self.project)
+        assign_task_to_user(task, self.developer, assigned_by=self.manager)
+        self.assertEqual(task.assigned_to, self.developer)
+        self.assertEqual(task.assigned_by, self.manager)
+
+    def test_workflow_transitions(self):
+        task = Task.objects.create(
+            title='Setup CI Pipeline',
+            project=self.project,
+            status=TaskStatus.TODO
+        )
+
+        # Valid transition: TODO -> IN_PROGRESS
+        transition_task_status(task, TaskStatus.IN_PROGRESS)
+        self.assertEqual(task.status, TaskStatus.IN_PROGRESS)
+
+        # Invalid transition: IN_PROGRESS -> COMPLETED (requires review)
+        with self.assertRaises(ValidationError):
+            transition_task_status(task, TaskStatus.COMPLETED)
+
+        # Valid transition: IN_PROGRESS -> IN_REVIEW
+        transition_task_status(task, TaskStatus.IN_REVIEW)
+        self.assertEqual(task.status, TaskStatus.IN_REVIEW)
+
+        # Valid transition: IN_REVIEW -> COMPLETED
+        transition_task_status(task, TaskStatus.COMPLETED)
+        self.assertEqual(task.status, TaskStatus.COMPLETED)
+        self.assertIsNotNone(task.completed_at)

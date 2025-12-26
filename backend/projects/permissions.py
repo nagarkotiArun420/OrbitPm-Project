@@ -1,62 +1,95 @@
 from rest_framework import permissions
 from accounts.models import User
 
+class IsAdmin(permissions.BasePermission):
+    """
+    ADMIN: full access to all project operations.
+    """
+    def has_permission(self, request, view):
+        return bool(
+            request.user and 
+            request.user.is_authenticated and 
+            request.user.role == User.Roles.ADMIN
+        )
+
+    def has_object_permission(self, request, view, obj):
+        return True
+
+
+class IsProjectManager(permissions.BasePermission):
+    """
+    MANAGER:
+    - create projects (has_permission POST)
+    - update assigned projects (has_object_permission)
+    - view assigned projects (has_object_permission)
+    """
+    def has_permission(self, request, view):
+        return bool(
+            request.user and 
+            request.user.is_authenticated and 
+            request.user.role == User.Roles.MANAGER
+        )
+
+    def has_object_permission(self, request, view, obj):
+        # Manager is authorized to view or edit if they manage it or created it.
+        return obj.manager == request.user or obj.created_by == request.user
+
+
+class IsAssignedDeveloper(permissions.BasePermission):
+    """
+    DEVELOPER:
+    - read-only access to assigned projects
+    """
+    def has_permission(self, request, view):
+        if not (request.user and request.user.is_authenticated and request.user.role == User.Roles.DEVELOPER):
+            return False
+        return request.method in permissions.SAFE_METHODS
+
+    def has_object_permission(self, request, view, obj):
+        # Developer is authorized to view if they are in the team_members
+        return obj.team_members.filter(id=request.user.id).exists()
+
+
+class IsProjectClient(permissions.BasePermission):
+    """
+    CLIENT:
+    - read-only access to projects where they are the client
+    """
+    def has_permission(self, request, view):
+        if not (request.user and request.user.is_authenticated and request.user.role == User.Roles.CLIENT):
+            return False
+        return request.method in permissions.SAFE_METHODS
+
+    def has_object_permission(self, request, view, obj):
+        # Client is authorized to view if they are the designated client
+        return obj.client == request.user
+
+
 class HasProjectPermission(permissions.BasePermission):
     """
-    Role-based object-level permission for OrbitPM Projects.
-    - ADMIN: Full access to all projects.
-    - MANAGER: Can create projects, and edit/delete projects they manage or created.
-    - DEVELOPER: View-only access to projects where they are in team_members.
-    - CLIENT: View-only access to projects where they are mapped as the client.
+    Legacy composite permission class for Projects module.
+    Delegates checks to the modular permission classes.
     """
-
     def has_permission(self, request, view):
-        # Must be authenticated
-        if not request.user or not request.user.is_authenticated:
-            return False
-
-        # Only Admins and Managers are allowed to create projects
-        if request.method == 'POST':
-            return request.user.role in [User.Roles.ADMIN, User.Roles.MANAGER]
-
-        return True
+        return (
+            IsAdmin().has_permission(request, view) or
+            IsProjectManager().has_permission(request, view) or
+            IsAssignedDeveloper().has_permission(request, view) or
+            IsProjectClient().has_permission(request, view)
+        )
 
     def has_object_permission(self, request, view, obj):
         user = request.user
-
-        # ADMIN possesses full permission on all records
+        if not user or not user.is_authenticated:
+            return False
+            
         if user.role == User.Roles.ADMIN:
-            return True
-
-        is_safe = request.method in permissions.SAFE_METHODS
-
-        # MANAGER Rules:
-        # - Can view project if they manage it, created it, or are assigned as team/client
-        # - Can edit/delete project only if they manage it or created it
-        if user.role == User.Roles.MANAGER:
-            is_manager_or_creator = (obj.manager == user or obj.created_by == user)
-            if is_safe:
-                return (
-                    is_manager_or_creator or 
-                    obj.client == user or 
-                    obj.team_members.filter(id=user.id).exists()
-                )
-            return is_manager_or_creator
-
-        # DEVELOPER Rules:
-        # - Read-only (SAFE_METHODS)
-        # - Must be a team member of the project
-        if user.role == User.Roles.DEVELOPER:
-            if not is_safe:
-                return False
-            return obj.team_members.filter(id=user.id).exists()
-
-        # CLIENT Rules:
-        # - Read-only (SAFE_METHODS)
-        # - Must be the designated client of the project
-        if user.role == User.Roles.CLIENT:
-            if not is_safe:
-                return False
-            return obj.client == user
-
+            return IsAdmin().has_object_permission(request, view, obj)
+        elif user.role == User.Roles.MANAGER:
+            return IsProjectManager().has_object_permission(request, view, obj)
+        elif user.role == User.Roles.DEVELOPER:
+            return IsAssignedDeveloper().has_object_permission(request, view, obj)
+        elif user.role == User.Roles.CLIENT:
+            return IsProjectClient().has_object_permission(request, view, obj)
+            
         return False
