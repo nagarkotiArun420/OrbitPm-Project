@@ -2,20 +2,19 @@ from django.db import transaction
 from django.core.exceptions import ValidationError
 from tasks.models import Task
 from tasks.constants import TaskStatus
+from tasks.validators import (
+    ALLOWED_TRANSITIONS,
+    validate_status_transition,
+    validate_assignee_project_membership,
+    validate_due_date_within_project,
+)
 
-# Define standard agile status transition matrix
-ALLOWED_TRANSITIONS = {
-    TaskStatus.TODO: [TaskStatus.IN_PROGRESS, TaskStatus.BLOCKED],
-    TaskStatus.IN_PROGRESS: [TaskStatus.IN_REVIEW, TaskStatus.BLOCKED, TaskStatus.TODO],
-    TaskStatus.IN_REVIEW: [TaskStatus.COMPLETED, TaskStatus.IN_PROGRESS, TaskStatus.TODO],
-    TaskStatus.COMPLETED: [TaskStatus.TODO, TaskStatus.IN_PROGRESS],
-    TaskStatus.BLOCKED: [TaskStatus.TODO, TaskStatus.IN_PROGRESS],
-}
 
 @transaction.atomic
 def create_task(project, title, created_by=None, **kwargs):
     """
     Service layer method to safely instantiate and validate a Task.
+    Triggers model clean() validations (team membership, due dates, etc.).
     """
     task = Task(
         project=project,
@@ -29,10 +28,39 @@ def create_task(project, title, created_by=None, **kwargs):
 
 
 @transaction.atomic
+def update_task(task, **validated_data):
+    """
+    Service layer method to safely update a Task.
+    Handles status transition validation if status is being changed,
+    then synchronizes all attributes under a transaction.
+    """
+    new_status = validated_data.get('status')
+    if new_status and new_status != task.status:
+        validate_status_transition(task.status, new_status)
+
+    # Update baseline attributes
+    for field, value in validated_data.items():
+        setattr(task, field, value)
+
+    # Triggers clean() which handles lifecycle logic (completed_at, etc.)
+    task.save()
+    return task
+
+
+@transaction.atomic
+def delete_task(task):
+    """
+    Service layer method to safely delete a Task.
+    Ensures deletion occurs within a transaction boundary.
+    """
+    task.delete()
+
+
+@transaction.atomic
 def assign_task_to_user(task, user, assigned_by=None):
     """
-    Business service to assign task to a user.
-    Model-level clean() verifies if user is part of the project team.
+    Business service to assign a task to a user.
+    Model-level clean() verifies if the user is part of the project team.
     """
     task.assigned_to = user
     if assigned_by:
@@ -44,21 +72,27 @@ def assign_task_to_user(task, user, assigned_by=None):
 @transaction.atomic
 def transition_task_status(task, new_status):
     """
-    State machine workflow transaction. Enforces valid Scrum status transitions
-    and handles automatic lifecycle completion timestamps.
+    State machine workflow transition. Enforces valid Scrum status transitions
+    and handles automatic lifecycle completion timestamps via model clean().
     """
     old_status = task.status
     if old_status == new_status:
         return task
 
     # Enforce workflow boundaries
-    allowed = ALLOWED_TRANSITIONS.get(old_status, [])
-    if new_status not in allowed:
-        raise ValidationError(
-            f"Invalid workflow status transition from '{old_status}' to '{new_status}'."
-        )
+    validate_status_transition(old_status, new_status)
 
     task.status = new_status
     # Triggers clean() which automatically configures completed_at timestamp
     task.save()
     return task
+
+
+@transaction.atomic
+def complete_task(task):
+    """
+    Convenience service to transition a task to COMPLETED status.
+    Validates the transition is legal and delegates to the standard
+    transition service which auto-sets completed_at via model clean().
+    """
+    return transition_task_status(task, TaskStatus.COMPLETED)
