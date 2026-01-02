@@ -56,6 +56,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
         """
         serializer.instance = create_project(
             created_by=self.request.user, 
+            request=self.request,
             **serializer.validated_data
         )
 
@@ -65,6 +66,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
         """
         serializer.instance = update_project(
             project=self.get_object(), 
+            request=self.request,
             **serializer.validated_data
         )
 
@@ -72,5 +74,6 @@ class ProjectViewSet(viewsets.ModelViewSet):
         """
         Intercept DRF destroy pipeline and route deletions to transactional services.
         """
-        delete_project(project=instance)
+        delete_project(project=instance, request=self.request)
+
 

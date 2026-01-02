@@ -62,6 +62,7 @@ class TaskViewSet(viewsets.ModelViewSet):
         """
         serializer.instance = create_task(
             created_by=self.request.user,
+            request=self.request,
             **serializer.validated_data
         )
 
@@ -71,6 +72,7 @@ class TaskViewSet(viewsets.ModelViewSet):
         """
         serializer.instance = update_task(
             task=self.get_object(),
+            request=self.request,
             **serializer.validated_data
         )
 
@@ -78,4 +80,5 @@ class TaskViewSet(viewsets.ModelViewSet):
         """
         Intercept DRF destroy pipeline and route deletions to transactional services.
         """
-        delete_task(task=instance)
+        delete_task(task=instance, request=self.request)
+
