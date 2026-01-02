@@ -8,10 +8,10 @@ from tasks.constants import TaskStatus
 # ──────────────────────────────────────────────────────────────
 ALLOWED_TRANSITIONS = {
     TaskStatus.TODO: [TaskStatus.IN_PROGRESS, TaskStatus.BLOCKED],
-    TaskStatus.IN_PROGRESS: [TaskStatus.IN_REVIEW, TaskStatus.BLOCKED, TaskStatus.TODO],
-    TaskStatus.IN_REVIEW: [TaskStatus.COMPLETED, TaskStatus.IN_PROGRESS, TaskStatus.TODO],
-    TaskStatus.COMPLETED: [TaskStatus.TODO, TaskStatus.IN_PROGRESS],
+    TaskStatus.IN_PROGRESS: [TaskStatus.IN_REVIEW, TaskStatus.BLOCKED],
+    TaskStatus.IN_REVIEW: [TaskStatus.COMPLETED, TaskStatus.IN_PROGRESS],
     TaskStatus.BLOCKED: [TaskStatus.TODO, TaskStatus.IN_PROGRESS],
+    TaskStatus.COMPLETED: [],
 }
 
 
@@ -38,6 +38,13 @@ def validate_status_transition(current_status, new_status):
             f"Invalid status transition from '{current_status}' to '{new_status}'. "
             f"Allowed transitions: {', '.join(allowed_labels) or 'none'}."
         )
+
+
+def get_valid_next_statuses(current_status):
+    """
+    Returns a list of allowed next status values from the current status.
+    """
+    return ALLOWED_TRANSITIONS.get(current_status, [])
 
 
 def validate_due_date_within_project(due_date, project):

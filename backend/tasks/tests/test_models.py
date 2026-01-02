@@ -180,25 +180,39 @@ class TaskArchitectureTests(TestCase):
         self.assertEqual(task.assigned_by, self.manager)
 
     def test_workflow_transitions(self):
+        from tasks.validators import get_valid_next_statuses
+        
         task = Task.objects.create(
             title='Setup CI Pipeline',
             project=self.project,
             status=TaskStatus.TODO
         )
 
-        # Valid transition: TODO -> IN_PROGRESS
+        # 1. Verify get_valid_next_statuses output
+        self.assertEqual(get_valid_next_statuses(TaskStatus.TODO), [TaskStatus.IN_PROGRESS, TaskStatus.BLOCKED])
+        self.assertEqual(get_valid_next_statuses(TaskStatus.COMPLETED), [])
+
+        # 2. Valid transition: TODO -> IN_PROGRESS
         transition_task_status(task, TaskStatus.IN_PROGRESS)
         self.assertEqual(task.status, TaskStatus.IN_PROGRESS)
 
-        # Invalid transition: IN_PROGRESS -> COMPLETED (requires review)
+        # 3. Invalid transition: IN_PROGRESS -> TODO (no longer allowed under strict rules)
+        with self.assertRaises(ValidationError):
+            transition_task_status(task, TaskStatus.TODO)
+
+        # 4. Invalid transition: IN_PROGRESS -> COMPLETED (requires review)
         with self.assertRaises(ValidationError):
             transition_task_status(task, TaskStatus.COMPLETED)
 
-        # Valid transition: IN_PROGRESS -> IN_REVIEW
+        # 5. Valid transition: IN_PROGRESS -> IN_REVIEW
         transition_task_status(task, TaskStatus.IN_REVIEW)
         self.assertEqual(task.status, TaskStatus.IN_REVIEW)
 
-        # Valid transition: IN_REVIEW -> COMPLETED
+        # 6. Valid transition: IN_REVIEW -> COMPLETED
         transition_task_status(task, TaskStatus.COMPLETED)
         self.assertEqual(task.status, TaskStatus.COMPLETED)
         self.assertIsNotNone(task.completed_at)
+
+        # 7. Invalid transition: COMPLETED -> TODO (cannot transition further from completed)
+        with self.assertRaises(ValidationError):
+            transition_task_status(task, TaskStatus.TODO)
