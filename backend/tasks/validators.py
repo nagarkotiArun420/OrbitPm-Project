@@ -84,3 +84,62 @@ def validate_assignee_project_membership(user, project):
         raise ValidationError(
             "The assigned user must be a member of the project team."
         )
+
+
+def validate_task_assignment(task, new_assignee, actor):
+    """
+    Validates task assignment rules:
+    - assigned users must belong to the related project team
+    - clients cannot be assigned tasks
+    - inactive users cannot receive assignments
+    - completed tasks cannot be reassigned
+    - only authorized roles can assign tasks
+    """
+    from accounts.models import User
+    
+    current_assignee = task.assigned_to if task.pk else None
+    
+    # Completed tasks cannot be reassigned
+    if task.pk and task.status == TaskStatus.COMPLETED and current_assignee != new_assignee:
+        raise ValidationError("Completed tasks cannot be reassigned.")
+        
+    if new_assignee:
+        # Inactive users cannot receive assignments
+        if not new_assignee.is_active:
+            raise ValidationError("Inactive users cannot receive assignments.")
+            
+        # Clients cannot be assigned tasks
+        if new_assignee.role == User.Roles.CLIENT:
+            raise ValidationError("Clients cannot be assigned tasks.")
+            
+        # Assigned users must belong to the related project team
+        validate_assignee_project_membership(new_assignee, task.project)
+        
+    # Role-Based Assignment Rules (authorized roles can assign tasks)
+    if current_assignee != new_assignee:
+        if not actor:
+            raise ValidationError("An actor is required to perform task assignment validation.")
+            
+        if actor.role == User.Roles.ADMIN:
+            pass  # Admin can assign any task
+            
+        elif actor.role == User.Roles.MANAGER:
+            # Manager can assign tasks within managed projects
+            is_managed = (
+                task.project.manager == actor or
+                task.project.created_by == actor
+            )
+            if not is_managed:
+                raise ValidationError("Managers can only assign tasks within their managed projects.")
+                
+        elif actor.role == User.Roles.DEVELOPER:
+            # Developer cannot assign tasks to others (can only self-assign or unassign)
+            if new_assignee is not None and new_assignee != actor:
+                raise ValidationError("Developers cannot assign tasks to other users.")
+                
+        elif actor.role == User.Roles.CLIENT:
+            # Clients cannot assign tasks at all
+            raise ValidationError("Clients cannot assign tasks.")
+            
+        else:
+            raise ValidationError("Unauthorized role to perform task assignment.")

@@ -216,3 +216,65 @@ class TaskArchitectureTests(TestCase):
         # 7. Invalid transition: COMPLETED -> TODO (cannot transition further from completed)
         with self.assertRaises(ValidationError):
             transition_task_status(task, TaskStatus.TODO)
+
+    def test_task_assignment_rules(self):
+        from tasks.validators import validate_task_assignment
+        
+        # 1. Clients cannot be assigned tasks
+        client_user = User.objects.create_user(
+            email='client@orbitpm.com', password='password123', full_name='Client User', role=User.Roles.CLIENT
+        )
+        self.project.team_members.add(client_user) # Try adding client to project team
+        
+        task = Task.objects.create(title='Some Task', project=self.project)
+        with self.assertRaises(ValidationError):
+            validate_task_assignment(task, client_user, actor=self.admin)
+            
+        # 2. Inactive users cannot receive assignments
+        inactive_user = User.objects.create_user(
+            email='inactive@orbitpm.com', password='password123', full_name='Inactive Dev', role=User.Roles.DEVELOPER, is_active=False
+        )
+        self.project.team_members.add(inactive_user)
+        with self.assertRaises(ValidationError):
+            validate_task_assignment(task, inactive_user, actor=self.admin)
+            
+        # 3. Completed tasks cannot be reassigned
+        completed_task = Task.objects.create(
+            title='Completed Task',
+            project=self.project,
+            status=TaskStatus.COMPLETED
+        )
+        with self.assertRaises(ValidationError):
+            validate_task_assignment(completed_task, self.developer, actor=self.admin)
+            
+        # 4. Role-based assignment: Admin can assign any task
+        validate_task_assignment(task, self.developer, actor=self.admin) # Should pass
+        
+        # 5. Manager can assign tasks in managed project
+        validate_task_assignment(task, self.developer, actor=self.manager) # Should pass
+        
+        # Manager cannot assign tasks in projects they do NOT manage
+        other_manager = User.objects.create_user(
+            email='other_mgr@orbitpm.com', password='password123', role=User.Roles.MANAGER
+        )
+        with self.assertRaises(ValidationError):
+            validate_task_assignment(task, self.developer, actor=other_manager)
+            
+        # 6. Developer cannot assign tasks to others
+        other_developer = User.objects.create_user(
+            email='other_dev@orbitpm.com', password='password123', role=User.Roles.DEVELOPER
+        )
+        self.project.team_members.add(other_developer)
+        with self.assertRaises(ValidationError):
+            validate_task_assignment(task, other_developer, actor=self.developer)
+            
+        # Developer can assign tasks to themselves
+        validate_task_assignment(task, self.developer, actor=self.developer) # Should pass
+        
+        # Developer can unassign themselves (set assignee to None)
+        task.assigned_to = self.developer
+        validate_task_assignment(task, None, actor=self.developer) # Should pass
+        
+        # 7. Client cannot assign tasks
+        with self.assertRaises(ValidationError):
+            validate_task_assignment(task, self.developer, actor=client_user)

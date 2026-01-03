@@ -7,6 +7,7 @@ from tasks.validators import (
     validate_status_transition,
     validate_due_date_within_project,
     validate_assignee_project_membership,
+    validate_task_assignment,
 )
 from accounts.serializers import UserMinSerializer
 
@@ -111,8 +112,11 @@ class TaskCreateSerializer(serializers.ModelSerializer):
         """
         Cross-field validations:
         1. Due date must fall within project timeline bounds.
-        2. Assigned user must be a member of the project team.
+        2. Assigned user must be a member of the project team and satisfy assignment policies.
         """
+        request = self.context.get('request')
+        actor = request.user if request else None
+
         project = attrs.get('project')
         due_date = attrs.get('due_date')
         assigned_to = attrs.get('assigned_to')
@@ -124,10 +128,11 @@ class TaskCreateSerializer(serializers.ModelSerializer):
             except Exception as e:
                 raise serializers.ValidationError({'due_date': str(e)})
 
-        # Validate assignee is a project team member
-        if assigned_to and project:
+        # Validate assignee and assignment rules
+        if 'assigned_to' in attrs or project:
             try:
-                validate_assignee_project_membership(assigned_to, project)
+                temp_task = Task(project=project, assigned_to=assigned_to)
+                validate_task_assignment(temp_task, assigned_to, actor=actor)
             except Exception as e:
                 raise serializers.ValidationError({'assigned_to': str(e)})
 
@@ -148,7 +153,11 @@ class TaskUpdateSerializer(TaskCreateSerializer):
         Extends creation validation with:
         1. Status transition enforcement via the agile workflow matrix.
         2. PATCH-aware field resolution (falls back to instance values).
+        3. Strict task assignment policies.
         """
+        request = self.context.get('request')
+        actor = request.user if request else None
+
         # Resolve fields for partial updates (PATCH)
         project = attrs.get('project') if 'project' in attrs else (
             self.instance.project if self.instance else None
@@ -167,10 +176,14 @@ class TaskUpdateSerializer(TaskCreateSerializer):
             except Exception as e:
                 raise serializers.ValidationError({'due_date': str(e)})
 
-        # Validate assignee is a project team member
-        if assigned_to and project:
+        # Validate assignee and task assignment rules
+        if 'assigned_to' in attrs or 'project' in attrs:
             try:
-                validate_assignee_project_membership(assigned_to, project)
+                temp_status = attrs.get('status', self.instance.status if self.instance else TaskStatus.TODO)
+                temp_task = Task(project=project, assigned_to=self.instance.assigned_to if self.instance else None, status=temp_status)
+                if self.instance and self.instance.pk:
+                    temp_task.pk = self.instance.pk
+                validate_task_assignment(temp_task, assigned_to, actor=actor)
             except Exception as e:
                 raise serializers.ValidationError({'assigned_to': str(e)})
 

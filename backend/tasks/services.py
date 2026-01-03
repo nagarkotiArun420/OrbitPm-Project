@@ -7,6 +7,7 @@ from tasks.validators import (
     validate_status_transition,
     validate_assignee_project_membership,
     validate_due_date_within_project,
+    validate_task_assignment,
 )
 from common.services import log_task_activity
 from common.constants import ActionType
@@ -19,6 +20,11 @@ def create_task(project, title, created_by=None, request=None, **kwargs):
     Service layer method to safely instantiate and validate a Task.
     Triggers model clean() validations (team membership, due dates, etc.).
     """
+    assigned_to = kwargs.get('assigned_to')
+    temp_task = Task(project=project, assigned_to=assigned_to)
+    actor = request.user if request else created_by
+    validate_task_assignment(temp_task, assigned_to, actor=actor)
+
     task = Task(
         project=project,
         title=title,
@@ -48,6 +54,10 @@ def update_task(task, request=None, **validated_data):
     """
     old_status = task.status
     old_assignee = task.assigned_to
+    
+    actor = request.user if request else None
+    if 'assigned_to' in validated_data:
+        validate_task_assignment(task, validated_data['assigned_to'], actor=actor)
     
     # Calculate changes for general fields (excluding status/assignee, which are logged separately)
     changes = get_model_changes(task, {k: v for k, v in validated_data.items() if k not in ['status', 'assigned_to']})
@@ -133,6 +143,9 @@ def assign_task_to_user(task, user, assigned_by=None, request=None):
     if old_assignee == user:
         return task
         
+    actor = request.user if request else assigned_by
+    validate_task_assignment(task, user, actor=actor)
+
     task.assigned_to = user
     if assigned_by:
         task.assigned_by = assigned_by
