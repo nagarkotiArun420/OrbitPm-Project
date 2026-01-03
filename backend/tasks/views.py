@@ -1,5 +1,6 @@
 from rest_framework import viewsets, permissions, filters
 from django_filters.rest_framework import DjangoFilterBackend
+from tasks.filters import TaskFilter
 from tasks.permissions import HasTaskPermission
 from tasks.selectors import get_authorized_tasks
 from tasks.serializers import (
@@ -28,9 +29,9 @@ class TaskViewSet(viewsets.ModelViewSet):
 
     # Filter, search, and ordering backends
     filter_backends = (DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter)
-    filterset_fields = ('status', 'priority', 'assigned_to', 'project')
-    search_fields = ('title',)
-    ordering_fields = ('created_at', 'due_date', 'priority', 'status')
+    filterset_class = TaskFilter
+    search_fields = ('title', 'description', 'project__title')
+    ordering_fields = ('created_at', 'due_date', 'priority', 'status', 'updated_at')
     ordering = ('-created_at',)
 
     def get_queryset(self):

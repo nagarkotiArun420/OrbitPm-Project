@@ -276,5 +276,6 @@ class TaskArchitectureTests(TestCase):
         validate_task_assignment(task, None, actor=self.developer) # Should pass
         
         # 7. Client cannot assign tasks
+        task.assigned_to = None  # Reset assignee to ensure it registers as a change
         with self.assertRaises(ValidationError):
             validate_task_assignment(task, self.developer, actor=client_user)
