@@ -48,7 +48,7 @@ class TaskListSerializer(serializers.ModelSerializer):
             'id', 'title', 'slug', 'status', 'priority',
             'due_date', 'assigned_to',
             'project_title', 'project_slug',
-            'created_at',
+            'created_at', 'is_archived',
         )
         read_only_fields = fields
 
@@ -70,6 +70,7 @@ class TaskDetailSerializer(serializers.ModelSerializer):
             'project', 'assigned_to', 'assigned_by',
             'estimated_hours', 'actual_hours',
             'due_date', 'completed_at',
+            'is_archived', 'archived_at',
             'created_at', 'updated_at',
         )
         read_only_fields = fields
@@ -146,7 +147,7 @@ class TaskUpdateSerializer(TaskCreateSerializer):
     status transition enforcement and PATCH-aware field resolution.
     """
     class Meta(TaskCreateSerializer.Meta):
-        fields = TaskCreateSerializer.Meta.fields
+        fields = TaskCreateSerializer.Meta.fields + ('is_archived',)
 
     def validate(self, attrs):
         """
@@ -186,6 +187,18 @@ class TaskUpdateSerializer(TaskCreateSerializer):
                 validate_task_assignment(temp_task, assigned_to, actor=actor)
             except Exception as e:
                 raise serializers.ValidationError({'assigned_to': str(e)})
+
+        # Validate archiving permission and rules
+        if 'is_archived' in attrs and self.instance and attrs['is_archived'] != self.instance.is_archived:
+            if not actor or actor.role not in [User.Roles.ADMIN, User.Roles.MANAGER]:
+                raise serializers.ValidationError({'is_archived': 'Only admins and managers can archive tasks.'})
+            if actor.role == User.Roles.MANAGER:
+                is_manager_of_project = (
+                    project.manager == actor or
+                    project.created_by == actor
+                )
+                if not is_manager_of_project:
+                    raise serializers.ValidationError({'is_archived': 'You can only archive tasks in your managed projects.'})
 
         # Validate status transition if status is being changed
         new_status = attrs.get('status')

@@ -7,6 +7,8 @@ from django.core.exceptions import ValidationError
 from projects.models import Project
 from tasks.constants import TaskStatus, TaskPriority
 from tasks.validators import validate_hours_non_negative
+from tasks.managers import TaskManager
+
 
 class Task(models.Model):
     """
@@ -18,6 +20,8 @@ class Task(models.Model):
     title = models.CharField(max_length=255)
     slug = models.SlugField(max_length=255, unique=True, blank=True)
     description = models.TextField(blank=True, null=True)
+
+    objects = TaskManager()
     
     status = models.CharField(
         max_length=20,
@@ -75,6 +79,21 @@ class Task(models.Model):
     due_date = models.DateField(blank=True, null=True, db_index=True)
     completed_at = models.DateTimeField(blank=True, null=True, db_index=True)
     
+    # Soft delete fields
+    is_deleted = models.BooleanField(default=False, db_index=True)
+    deleted_at = models.DateTimeField(blank=True, null=True, db_index=True)
+    deleted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='deleted_tasks'
+    )
+    
+    # Archive fields
+    is_archived = models.BooleanField(default=False, db_index=True)
+    archived_at = models.DateTimeField(blank=True, null=True, db_index=True)
+    
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -124,6 +143,25 @@ class Task(models.Model):
                 self.completed_at = timezone.now()
         else:
             self.completed_at = None
+
+        # 5. Soft Delete and Archive validations & adjustments
+        if self.pk:
+            try:
+                original = Task._base_manager.get(pk=self.pk)
+                if original.is_deleted:
+                    raise ValidationError("Deleted tasks cannot be modified.")
+                if original.is_archived and original.status != self.status:
+                    raise ValidationError("Archived tasks cannot change workflow states.")
+            except Task.DoesNotExist:
+                pass
+
+        if self.is_archived:
+            if self.status != TaskStatus.COMPLETED:
+                raise ValidationError("Only completed tasks can be archived.")
+            if not self.archived_at:
+                self.archived_at = timezone.now()
+        else:
+            self.archived_at = None
 
     def save(self, *args, **kwargs):
         # Auto-generate unique slug from title if empty

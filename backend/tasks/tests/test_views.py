@@ -140,3 +140,56 @@ class TaskAPITests(APITestCase):
         self.assertEqual(results[0]['id'], str(self.task3.id))
         self.assertEqual(results[1]['id'], str(self.task1.id))
         self.assertEqual(results[2]['id'], str(self.task2.id))
+
+    def test_api_soft_delete(self):
+        self.client.force_authenticate(user=self.manager)
+        detail_url = reverse('task-detail', kwargs={'slug': self.task1.slug})
+        
+        # 1. Trigger deletion
+        response = self.client.delete(detail_url)
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        
+        # 2. Assert it is soft-deleted (remains in database, marked is_deleted=True)
+        task_in_db = Task._base_manager.filter(id=self.task1.id).first()
+        self.assertIsNotNone(task_in_db)
+        self.assertTrue(task_in_db.is_deleted)
+        self.assertEqual(task_in_db.deleted_by, self.manager)
+        
+        # 3. Assert it is excluded from list queries
+        response = self.client.get(self.list_url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data['data']['results']
+        task_ids = [res['id'] for res in results]
+        self.assertNotIn(str(self.task1.id), task_ids)
+
+    def test_api_archive(self):
+        self.client.force_authenticate(user=self.manager)
+        detail_url = reverse('task-detail', kwargs={'slug': self.task1.slug})
+        
+        # 1. Trying to archive non-completed task should fail
+        response = self.client.patch(detail_url, {'is_archived': True})
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        
+        # 2. Mark task completed in database
+        Task._base_manager.filter(id=self.task1.id).update(status=TaskStatus.COMPLETED)
+        
+        # 3. Archive completed task
+        response = self.client.patch(detail_url, {'is_archived': True})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['data']['is_archived'])
+        
+        # 4. Excluded from default list
+        response = self.client.get(self.list_url)
+        results = response.data['data']['results']
+        task_ids = [res['id'] for res in results]
+        self.assertNotIn(str(self.task1.id), task_ids)
+        
+        # 5. Included in list when ?is_archived=true
+        response = self.client.get(self.list_url, {'is_archived': 'true'})
+        results = response.data['data']['results']
+        task_ids = [res['id'] for res in results]
+        self.assertIn(str(self.task1.id), task_ids)
+        
+        # 6. Archived tasks cannot move workflow states
+        response = self.client.patch(detail_url, {'status': TaskStatus.TODO})
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)

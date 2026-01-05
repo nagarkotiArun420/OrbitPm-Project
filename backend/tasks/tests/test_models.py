@@ -279,3 +279,46 @@ class TaskArchitectureTests(TestCase):
         task.assigned_to = None  # Reset assignee to ensure it registers as a change
         with self.assertRaises(ValidationError):
             validate_task_assignment(task, self.developer, actor=client_user)
+
+    def test_soft_delete_and_archive(self):
+        from django.utils import timezone
+        
+        # Create active, completed, and deleted tasks
+        task_active = Task.objects.create(title='Active Task', project=self.project)
+        task_completed = Task.objects.create(title='Completed Task', project=self.project, status=TaskStatus.COMPLETED)
+        
+        # Test 1: Soft delete
+        task_active.is_deleted = True
+        task_active.deleted_at = timezone.now()
+        task_active.deleted_by = self.admin
+        task_active.save()
+        
+        # Active queryset should exclude it
+        self.assertNotIn(task_active, Task.objects.active())
+        self.assertIn(task_active, Task.objects.deleted())
+        
+        # Test 2: Deleted tasks cannot be modified
+        task_active.title = 'Mutated Title'
+        with self.assertRaises(ValidationError):
+            task_active.save()
+            
+        # Test 3: Archiving completed task
+        task_completed.is_archived = True
+        task_completed.save()
+        self.assertTrue(task_completed.is_archived)
+        self.assertIsNotNone(task_completed.archived_at)
+        
+        # Active queryset should exclude archived tasks, archived queryset should include them
+        self.assertNotIn(task_completed, Task.objects.active())
+        self.assertIn(task_completed, Task.objects.archived())
+        
+        # Test 4: Cannot archive non-completed task
+        task_new = Task.objects.create(title='New Task', project=self.project, status=TaskStatus.TODO)
+        task_new.is_archived = True
+        with self.assertRaises(ValidationError):
+            task_new.save()
+            
+        # Test 5: Archived tasks cannot change status
+        task_completed.status = TaskStatus.TODO
+        with self.assertRaises(ValidationError):
+            task_completed.save()

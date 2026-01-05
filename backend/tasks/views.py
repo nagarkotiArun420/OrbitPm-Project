@@ -38,8 +38,13 @@ class TaskViewSet(viewsets.ModelViewSet):
         """
         Dynamically filter task listings to enforce strict data isolation per role.
         Utilizes selectors layer to enforce role-specific visibility and optimize queries.
+        Excludes soft-deleted tasks, and partitions archived/active tasks in lists.
         """
-        return get_authorized_tasks(self.request.user)
+        qs = get_authorized_tasks(self.request.user).filter(is_deleted=False)
+        if self.action == 'list':
+            is_archived = self.request.query_params.get('is_archived', 'false').lower() == 'true'
+            qs = qs.filter(is_archived=is_archived)
+        return qs
 
     def get_serializer_class(self):
         """

@@ -1,5 +1,6 @@
 from django.db import transaction
 from django.core.exceptions import ValidationError
+from django.utils import timezone
 from tasks.models import Task
 from tasks.constants import TaskStatus
 from tasks.validators import (
@@ -120,17 +121,47 @@ def update_task(task, request=None, **validated_data):
 @transaction.atomic
 def delete_task(task, request=None):
     """
-    Service layer method to safely delete a Task.
-    Ensures deletion occurs within a transaction boundary.
+    Service layer method to safely soft delete a Task.
+    Sets is_deleted=True, recording deletion details, and logs the activity.
     """
+    actor = request.user if request else None
+    task.is_deleted = True
+    task.deleted_at = timezone.now()
+    task.deleted_by = actor
+    task.save()
+    
     log_task_activity(
-        actor=request.user if request else None,
+        actor=actor,
         task=task,
         action_type=ActionType.DELETED,
-        description=f"Task '{task.title}' was deleted.",
+        description=f"Task '{task.title}' was soft deleted.",
         request=request
     )
-    task.delete()
+
+
+@transaction.atomic
+def archive_task(task, request=None):
+    """
+    Business service to archive a completed task.
+    """
+    actor = request.user if request else None
+    
+    # Enforce status is completed
+    if task.status != TaskStatus.COMPLETED:
+        raise ValidationError("Only completed tasks can be archived.")
+        
+    task.is_archived = True
+    task.archived_at = timezone.now()
+    task.save()
+    
+    log_task_activity(
+        actor=actor,
+        task=task,
+        action_type=ActionType.UPDATED,
+        description=f"Task '{task.title}' was archived.",
+        request=request
+    )
+    return task
 
 
 @transaction.atomic
