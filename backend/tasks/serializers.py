@@ -189,7 +189,12 @@ class TaskUpdateSerializer(TaskCreateSerializer):
                 raise serializers.ValidationError({'assigned_to': str(e)})
 
         # Validate archiving permission and rules
-        if 'is_archived' in attrs and self.instance and attrs['is_archived'] != self.instance.is_archived:
+        if attrs.get('is_archived') is True and self.instance and not self.instance.is_archived:
+            # Check if task status is completed
+            status_val = attrs.get('status', self.instance.status)
+            if status_val != TaskStatus.COMPLETED:
+                raise serializers.ValidationError({'is_archived': 'Only completed tasks can be archived.'})
+
             if not actor or actor.role not in [User.Roles.ADMIN, User.Roles.MANAGER]:
                 raise serializers.ValidationError({'is_archived': 'Only admins and managers can archive tasks.'})
             if actor.role == User.Roles.MANAGER:

@@ -1,4 +1,8 @@
-from rest_framework import viewsets, permissions, filters
+from rest_framework import viewsets, permissions, filters, status
+from rest_framework.response import Response
+from rest_framework.decorators import action
+from django.shortcuts import get_object_or_404
+from django.core.exceptions import ValidationError
 from django_filters.rest_framework import DjangoFilterBackend
 from tasks.filters import TaskFilter
 from tasks.permissions import HasTaskPermission
@@ -9,7 +13,14 @@ from tasks.serializers import (
     TaskCreateSerializer,
     TaskUpdateSerializer,
 )
-from tasks.services import create_task, update_task, delete_task
+from tasks.services import (
+    create_task,
+    update_task,
+    delete_task,
+    restore_task,
+    archive_task,
+    unarchive_task,
+)
 
 
 class TaskViewSet(viewsets.ModelViewSet):
@@ -61,6 +72,20 @@ class TaskViewSet(viewsets.ModelViewSet):
 
         return TaskDetailSerializer
 
+    def get_object(self):
+        """
+        Custom get_object lookup to fetch soft-deleted or archived tasks
+        when executing recovery operations.
+        """
+        if self.action in ['restore', 'unarchive']:
+            queryset = get_authorized_tasks(self.request.user)
+            lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+            filter_kwargs = {self.lookup_field: self.kwargs[lookup_url_kwarg]}
+            obj = get_object_or_404(queryset, **filter_kwargs)
+            self.check_object_permissions(self.request, obj)
+            return obj
+        return super().get_object()
+
     def perform_create(self, serializer):
         """
         Intercept DRF save pipeline and route creation to transactional services.
@@ -87,4 +112,55 @@ class TaskViewSet(viewsets.ModelViewSet):
         Intercept DRF destroy pipeline and route deletions to transactional services.
         """
         delete_task(task=instance, request=self.request)
+
+    @action(detail=True, methods=['post'], url_path='restore')
+    def restore(self, request, slug=None):
+        """
+        Restore a soft-deleted task.
+        """
+        task = self.get_object()
+        try:
+            restore_task(task=task, request=request)
+            serializer = TaskDetailSerializer(task)
+            return Response({
+                'message': 'Task restored successfully.',
+                'data': serializer.data
+            }, status=status.HTTP_200_OK)
+        except ValidationError as e:
+            msg = e.message if hasattr(e, 'message') else (e.messages[0] if hasattr(e, 'messages') and e.messages else str(e))
+            return Response({'error': msg}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['post'], url_path='archive')
+    def archive(self, request, slug=None):
+        """
+        Archive a completed task.
+        """
+        task = self.get_object()
+        try:
+            archive_task(task=task, request=request)
+            serializer = TaskDetailSerializer(task)
+            return Response({
+                'message': 'Task archived successfully.',
+                'data': serializer.data
+            }, status=status.HTTP_200_OK)
+        except ValidationError as e:
+            msg = e.message if hasattr(e, 'message') else (e.messages[0] if hasattr(e, 'messages') and e.messages else str(e))
+            return Response({'error': msg}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['post'], url_path='unarchive')
+    def unarchive(self, request, slug=None):
+        """
+        Unarchive an archived task.
+        """
+        task = self.get_object()
+        try:
+            unarchive_task(task=task, request=request)
+            serializer = TaskDetailSerializer(task)
+            return Response({
+                'message': 'Task unarchived successfully.',
+                'data': serializer.data
+            }, status=status.HTTP_200_OK)
+        except ValidationError as e:
+            msg = e.message if hasattr(e, 'message') else (e.messages[0] if hasattr(e, 'messages') and e.messages else str(e))
+            return Response({'error': msg}, status=status.HTTP_400_BAD_REQUEST)
 

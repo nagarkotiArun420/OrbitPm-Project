@@ -193,3 +193,38 @@ class TaskAPITests(APITestCase):
         # 6. Archived tasks cannot move workflow states
         response = self.client.patch(detail_url, {'status': TaskStatus.TODO})
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_api_restore_and_unarchive(self):
+        # 1. Soft-delete the task
+        self.task1.is_deleted = True
+        self.task1.save()
+
+        # Try to restore using developer (unauthorized) -> should fail
+        self.client.force_authenticate(user=self.developer)
+        restore_url = reverse('task-restore', kwargs={'slug': self.task1.slug})
+        response = self.client.post(restore_url)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        # Restore using manager (authorized) -> should succeed
+        self.client.force_authenticate(user=self.manager)
+        response = self.client.post(restore_url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.task1.refresh_from_db()
+        self.assertFalse(self.task1.is_deleted)
+
+        # 2. Archive using POST endpoint
+        # Mark completed first
+        Task._base_manager.filter(id=self.task1.id).update(status=TaskStatus.COMPLETED)
+        archive_url = reverse('task-archive', kwargs={'slug': self.task1.slug})
+        response = self.client.post(archive_url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.task1.refresh_from_db()
+        self.assertTrue(self.task1.is_archived)
+
+        # 3. Unarchive using developer who is assigned to it (authorized)
+        unarchive_url = reverse('task-unarchive', kwargs={'slug': self.task1.slug})
+        self.client.force_authenticate(user=self.developer)
+        response = self.client.post(unarchive_url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.task1.refresh_from_db()
+        self.assertFalse(self.task1.is_archived)

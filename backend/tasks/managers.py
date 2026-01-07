@@ -22,6 +22,12 @@ class TaskQuerySet(models.QuerySet):
         """
         return self.filter(is_deleted=True)
 
+    def recoverable(self):
+        """
+        Returns tasks that are either soft-deleted or archived.
+        """
+        return self.filter(models.Q(is_deleted=True) | models.Q(is_archived=True))
+
 
 class TaskManager(models.Manager):
     """
@@ -38,3 +44,6 @@ class TaskManager(models.Manager):
 
     def deleted(self):
         return self.get_queryset().deleted()
+
+    def recoverable(self):
+        return self.get_queryset().recoverable()

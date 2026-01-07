@@ -139,14 +139,57 @@ def delete_task(task, request=None):
     )
 
 
+def check_recovery_permission(task, actor, action):
+    """
+    Checks if an actor has permission to perform restore/archive/unarchive.
+    ADMIN: full access
+    MANAGER: only in managed/created projects
+    DEVELOPER: cannot restore. Can unarchive if assigned to them.
+    CLIENT: no access
+    """
+    from django.contrib.auth import get_user_model
+    User = get_user_model()
+    
+    if not actor:
+        raise ValidationError("Authentication is required.")
+        
+    if actor.role == User.Roles.ADMIN:
+        return True
+        
+    if actor.role == User.Roles.MANAGER:
+        # Check if project manager or project creator
+        is_managed = (
+            task.project.manager == actor or
+            task.project.created_by == actor
+        )
+        if is_managed:
+            return True
+        raise ValidationError("Managers can only manage tasks in their own projects.")
+        
+    if actor.role == User.Roles.DEVELOPER:
+        if action == 'unarchive':
+            if task.assigned_to == actor:
+                return True
+            raise ValidationError("Developers can only unarchive tasks assigned to them.")
+        raise ValidationError("Developers are not authorized to restore deleted tasks or archive tasks.")
+        
+    raise ValidationError("Clients are not authorized to manage task lifecycles.")
+
+
 @transaction.atomic
 def archive_task(task, request=None):
     """
     Business service to archive a completed task.
     """
     actor = request.user if request else None
+    check_recovery_permission(task, actor, 'archive')
     
-    # Enforce status is completed
+    if task.is_deleted:
+        raise ValidationError("Cannot archive a deleted task.")
+        
+    if task.is_archived:
+        raise ValidationError("Task is already archived.")
+        
     if task.status != TaskStatus.COMPLETED:
         raise ValidationError("Only completed tasks can be archived.")
         
@@ -159,6 +202,63 @@ def archive_task(task, request=None):
         task=task,
         action_type=ActionType.UPDATED,
         description=f"Task '{task.title}' was archived.",
+        request=request
+    )
+    return task
+
+
+@transaction.atomic
+def restore_task(task, request=None):
+    """
+    Business service to restore a soft-deleted task.
+    """
+    actor = request.user if request else None
+    check_recovery_permission(task, actor, 'restore')
+    
+    if not task.project:
+        raise ValidationError("Cannot restore task because the project does not exist.")
+        
+    if not task.is_deleted:
+        raise ValidationError("Task is not deleted.")
+        
+    task.is_deleted = False
+    task.deleted_at = None
+    task.deleted_by = None
+    task.save()
+    
+    log_task_activity(
+        actor=actor,
+        task=task,
+        action_type=ActionType.UPDATED,
+        description=f"Task '{task.title}' was restored.",
+        request=request
+    )
+    return task
+
+
+@transaction.atomic
+def unarchive_task(task, request=None):
+    """
+    Business service to unarchive an archived task.
+    """
+    actor = request.user if request else None
+    check_recovery_permission(task, actor, 'unarchive')
+    
+    if task.is_deleted:
+        raise ValidationError("Cannot unarchive a deleted task.")
+        
+    if not task.is_archived:
+        raise ValidationError("Task is not archived.")
+        
+    task.is_archived = False
+    task.archived_at = None
+    task.save()
+    
+    log_task_activity(
+        actor=actor,
+        task=task,
+        action_type=ActionType.UPDATED,
+        description=f"Task '{task.title}' was unarchived.",
         request=request
     )
     return task
