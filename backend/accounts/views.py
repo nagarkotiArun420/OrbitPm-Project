@@ -4,8 +4,10 @@ from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework_simplejwt.exceptions import TokenError
+from rest_framework_simplejwt.exceptions import TokenError, InvalidToken
 from django.contrib.auth import get_user_model
+from common.services import log_activity
+from common.constants import ActionType, TargetType
 
 from accounts.serializers import (
     RegisterSerializer, 
@@ -20,6 +22,29 @@ class CustomTokenObtainPairView(TokenObtainPairView):
     Endpoint for user login. Returns JWT access & refresh tokens along with user information.
     """
     serializer_class = CustomTokenObtainPairSerializer
+
+    def post(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+
+        try:
+            serializer.is_valid(raise_exception=True)
+        except TokenError as e:
+            raise InvalidToken(e.args[0])
+
+        user = serializer.user
+        
+        # Log successful login
+        log_activity(
+            actor=user,
+            action_type=ActionType.LOGIN,
+            target_type=TargetType.USER,
+            target_id=str(user.id),
+            target_repr=user.email,
+            description=f"User {user.email} logged in successfully.",
+            request=request
+        )
+
+        return Response(serializer.validated_data, status=status.HTTP_200_OK)
 
 class CustomTokenRefreshView(TokenRefreshView):
     """
@@ -104,6 +129,18 @@ class LogoutView(APIView):
                 
             token = RefreshToken(refresh_token)
             token.blacklist()
+            
+            # Log logout event
+            user = request.user
+            log_activity(
+                actor=user,
+                action_type=ActionType.LOGOUT,
+                target_type=TargetType.USER,
+                target_id=str(user.id),
+                target_repr=user.email,
+                description=f"User {user.email} logged out.",
+                request=request
+            )
             
             return Response({
                 'success': True,

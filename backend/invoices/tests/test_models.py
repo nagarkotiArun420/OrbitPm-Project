@@ -21,8 +21,8 @@ class InvoiceModelTests(TestCase):
             role=User.Roles.CLIENT
         )
         self.project = Project.objects.create(
-            name='Alpha App',
-            owner=self.manager
+            title='Alpha App',
+            manager=self.manager
         )
 
     def test_create_invoice_successful(self):
