@@ -1,9 +1,7 @@
 from rest_framework import viewsets, permissions, filters
 from django_filters.rest_framework import DjangoFilterBackend
-from django.db.models import Q
-from accounts.models import User
-from projects.models import Project
-from projects.permissions import HasProjectPermission
+from projects.permissions import IsAdmin, IsProjectManager, IsAssignedDeveloper, IsProjectClient
+from projects.selectors import get_authorized_projects
 from projects.serializers import (
     ProjectListSerializer,
     ProjectDetailSerializer,
@@ -18,7 +16,10 @@ class ProjectViewSet(viewsets.ModelViewSet):
     Funnels writes to transactional services and isolates reads per role permissions.
     """
     lookup_field = 'slug'
-    permission_classes = [permissions.IsAuthenticated, HasProjectPermission]
+    permission_classes = [
+        permissions.IsAuthenticated,
+        (IsAdmin | IsProjectManager | IsAssignedDeveloper | IsProjectClient)
+    ]
     
     # Filter and search backends configuration
     filter_backends = (DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter)
@@ -29,43 +30,10 @@ class ProjectViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         """
-        Dynamically filter project listings to enforce strict data isolation per role:
-        - ADMIN: Full access to all projects.
-        - MANAGER: Associated projects (manager, creator, client, or team member).
-        - DEVELOPER: Projects where they are in team members.
-        - CLIENT: Projects where they are the designated client.
-        
-        Leverages select_related and prefetch_related to eliminate N+1 queries.
+        Dynamically filter project listings to enforce strict data isolation per role.
+        Utilizes selectors layer to enforce role-specific visibility and optimize queries.
         """
-        user = self.request.user
-        
-        # Base query optimization
-        queryset = Project.objects.all().select_related(
-            'manager', 'client', 'created_by'
-        ).prefetch_related('team_members')
-
-        # ADMIN possesses omniscient view
-        if user.role == User.Roles.ADMIN:
-            return queryset
-
-        # MANAGER sees any projects they manage, created, or are mapped onto
-        if user.role == User.Roles.MANAGER:
-            return queryset.filter(
-                Q(manager=user) | 
-                Q(created_by=user) | 
-                Q(client=user) | 
-                Q(team_members=user)
-            ).distinct()
-
-        # DEVELOPER sees projects they actively program on
-        if user.role == User.Roles.DEVELOPER:
-            return queryset.filter(team_members=user)
-
-        # CLIENT sees projects they are funding
-        if user.role == User.Roles.CLIENT:
-            return queryset.filter(client=user)
-
-        return Project.objects.none()
+        return get_authorized_projects(self.request.user)
 
     def get_serializer_class(self):
         """
@@ -88,6 +56,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
         """
         serializer.instance = create_project(
             created_by=self.request.user, 
+            request=self.request,
             **serializer.validated_data
         )
 
@@ -97,6 +66,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
         """
         serializer.instance = update_project(
             project=self.get_object(), 
+            request=self.request,
             **serializer.validated_data
         )
 
@@ -104,4 +74,6 @@ class ProjectViewSet(viewsets.ModelViewSet):
         """
         Intercept DRF destroy pipeline and route deletions to transactional services.
         """
-        delete_project(project=instance)
+        delete_project(project=instance, request=self.request)
+
+
