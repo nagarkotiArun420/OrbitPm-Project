@@ -168,9 +168,10 @@ class HasTaskCommentPermission(permissions.BasePermission):
         if request.user.role == User.Roles.ADMIN:
             return True
 
-        # MANAGER: manage comments within managed projects
+        # MANAGER: delete comments within managed projects, but editing remains author-owned.
         if request.user.role == User.Roles.MANAGER:
-            # Managers can edit/delete comments within their managed projects
+            if request.method not in ('DELETE',):
+                return False
             return (
                 obj.task.project.manager == request.user or
                 obj.task.project.created_by == request.user

@@ -56,11 +56,7 @@ class TaskCommentTests(APITestCase):
             status=TaskStatus.IN_PROGRESS,
             priority=TaskPriority.HIGH,
             assigned_to=self.developer,
-<<<<<<< HEAD
             assigned_by=self.manager
-=======
-            created_by=self.manager
->>>>>>> backup-may20
         )
 
         self.deleted_task = Task.objects.create(
@@ -69,11 +65,7 @@ class TaskCommentTests(APITestCase):
             status=TaskStatus.TODO,
             priority=TaskPriority.LOW,
             is_deleted=True,
-<<<<<<< HEAD
             assigned_by=self.manager
-=======
-            created_by=self.manager
->>>>>>> backup-may20
         )
 
         self.archived_task = Task.objects.create(
@@ -83,11 +75,7 @@ class TaskCommentTests(APITestCase):
             priority=TaskPriority.MEDIUM,
             is_archived=True,
             archived_at=timezone.now(),
-<<<<<<< HEAD
             assigned_by=self.manager
-=======
-            created_by=self.manager
->>>>>>> backup-may20
         )
 
         # URLs
@@ -199,11 +187,7 @@ class TaskCommentTests(APITestCase):
         response = self.client.post(self.list_url, {'content': 'Log this please.'})
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 
-<<<<<<< HEAD
         log = ActivityLog.objects.filter(target_type='TASK', target_id=str(self.task.id)).latest('created_at')
-=======
-        log = ActivityLog.objects.filter(task=self.task).latest('created_at')
->>>>>>> backup-may20
         self.assertEqual(log.actor, self.developer)
         self.assertIn("Comment added to task", log.description)
 
@@ -213,11 +197,7 @@ class TaskCommentTests(APITestCase):
         response = self.client.patch(detail_url, {'content': 'Updated log.'})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
-<<<<<<< HEAD
         log = ActivityLog.objects.filter(target_type='TASK', target_id=str(self.task.id)).latest('created_at')
-=======
-        log = ActivityLog.objects.filter(task=self.task).latest('created_at')
->>>>>>> backup-may20
         self.assertEqual(log.actor, self.developer)
         self.assertIn("Comment on task", log.description)
         self.assertIn("was updated", log.description)
@@ -226,11 +206,7 @@ class TaskCommentTests(APITestCase):
         response = self.client.delete(detail_url)
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
 
-<<<<<<< HEAD
         log = ActivityLog.objects.filter(target_type='TASK', target_id=str(self.task.id)).latest('created_at')
-=======
-        log = ActivityLog.objects.filter(task=self.task).latest('created_at')
->>>>>>> backup-may20
         self.assertEqual(log.actor, self.developer)
         self.assertIn("Comment on task", log.description)
         self.assertIn("was deleted", log.description)

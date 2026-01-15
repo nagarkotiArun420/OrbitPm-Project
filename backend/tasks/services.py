@@ -1,5 +1,7 @@
+from datetime import timedelta
 from django.db import transaction
 from django.core.exceptions import ValidationError
+from django.conf import settings
 from django.utils import timezone
 from tasks.models import Task, TaskComment
 from tasks.constants import TaskStatus
@@ -13,6 +15,9 @@ from tasks.validators import (
 from common.services import log_task_activity
 from common.constants import ActionType
 from common.utils import get_model_changes
+from notifications.constants import NotificationType
+from notifications.models import Notification
+from notifications.services import send_in_app_notification
 
 
 @transaction.atomic
@@ -614,3 +619,190 @@ def delete_attachment(attachment, actor, request=None):
         },
         request=request
     )
+
+
+def get_deadline_warning_days():
+    """
+    Returns the configured approaching-deadline threshold.
+    """
+    return getattr(settings, 'TASK_DEADLINE_WARNING_DAYS', 3)
+
+
+def get_upcoming_deadlines(days=None, queryset=None, reference_date=None):
+    """
+    Returns active, incomplete tasks with deadlines approaching within the warning window.
+    """
+    if days is None:
+        days = get_deadline_warning_days()
+    if queryset is None:
+        queryset = Task.objects.all()
+    reference_date = reference_date or timezone.localdate()
+    end_date = reference_date + timedelta(days=days)
+    return queryset.incomplete().filter(
+        due_date__gte=reference_date,
+        due_date__lte=end_date,
+    ).select_related('project', 'assigned_to', 'project__manager')
+
+
+def detect_overdue_tasks(queryset=None, reference_date=None):
+    """
+    Returns active, incomplete tasks whose due date has passed.
+    """
+    if queryset is None:
+        queryset = Task.objects.all()
+    return queryset.overdue(reference_date=reference_date).select_related(
+        'project',
+        'assigned_to',
+        'project__manager',
+    )
+
+
+def _deadline_recipients(task):
+    """
+    Collects users who should receive deadline visibility notifications.
+    """
+    recipients = []
+    seen = set()
+    for user in (task.assigned_to, task.project.manager):
+        if user and user.id not in seen:
+            recipients.append(user)
+            seen.add(user.id)
+    return recipients
+
+
+def _send_unique_deadline_notification(
+    recipient,
+    title,
+    message,
+    reference_date,
+    notification_type,
+    metadata=None
+):
+    exists = Notification.objects.filter(
+        recipient=recipient,
+        title=title,
+        message=message,
+        created_at__date=reference_date,
+    ).exists()
+    if exists:
+        return None
+    return send_in_app_notification(
+        recipient=recipient,
+        title=title,
+        message=message,
+        notification_type=notification_type,
+        metadata=metadata,
+    )
+
+
+@transaction.atomic
+def generate_overdue_task_notifications(queryset=None, reference_date=None):
+    """
+    Creates in-app notification and activity events for currently overdue tasks.
+    Intended to be called by a future scheduled job or admin workflow.
+    """
+    reference_date = reference_date or timezone.localdate()
+    tasks = list(detect_overdue_tasks(queryset=queryset, reference_date=reference_date))
+    notifications = []
+
+    for task in tasks:
+        days_overdue = (reference_date - task.due_date).days
+        title = 'Task overdue'
+        message = (
+            f"Task '{task.title}' was due on {task.due_date.isoformat()} "
+            f"and is {days_overdue} day(s) overdue."
+        )
+        created_notifications = [
+            notification
+            for recipient in _deadline_recipients(task)
+            for notification in [
+                _send_unique_deadline_notification(
+                    recipient=recipient,
+                    title=title,
+                    message=message,
+                    reference_date=reference_date,
+                    notification_type=NotificationType.TASK_OVERDUE,
+                    metadata={
+                        'task_id': str(task.id),
+                        'deadline_event': 'overdue_detected',
+                        'due_date': task.due_date.isoformat(),
+                        'days_overdue': days_overdue,
+                    },
+                )
+            ]
+            if notification is not None
+        ]
+        notifications.extend(created_notifications)
+
+        if created_notifications:
+            log_task_activity(
+                actor=None,
+                task=task,
+                action_type=ActionType.UPDATED,
+                description=f"Task '{task.title}' was detected as overdue.",
+                metadata={
+                    'deadline_event': 'overdue_detected',
+                    'due_date': task.due_date.isoformat(),
+                    'days_overdue': days_overdue,
+                }
+            )
+
+    return notifications
+
+
+@transaction.atomic
+def generate_upcoming_deadline_notifications(days=None, queryset=None, reference_date=None):
+    """
+    Creates in-app notification and activity events for tasks nearing their deadline.
+    """
+    reference_date = reference_date or timezone.localdate()
+    tasks = list(get_upcoming_deadlines(
+        days=days,
+        queryset=queryset,
+        reference_date=reference_date,
+    ))
+    notifications = []
+
+    for task in tasks:
+        days_until_due = (task.due_date - reference_date).days
+        title = 'Task deadline approaching'
+        message = (
+            f"Task '{task.title}' is due on {task.due_date.isoformat()} "
+            f"in {days_until_due} day(s)."
+        )
+        created_notifications = [
+            notification
+            for recipient in _deadline_recipients(task)
+            for notification in [
+                _send_unique_deadline_notification(
+                    recipient=recipient,
+                    title=title,
+                    message=message,
+                    reference_date=reference_date,
+                    notification_type=NotificationType.TASK_DEADLINE_APPROACHING,
+                    metadata={
+                        'task_id': str(task.id),
+                        'deadline_event': 'deadline_approaching',
+                        'due_date': task.due_date.isoformat(),
+                        'days_until_due': days_until_due,
+                    },
+                )
+            ]
+            if notification is not None
+        ]
+        notifications.extend(created_notifications)
+
+        if created_notifications:
+            log_task_activity(
+                actor=None,
+                task=task,
+                action_type=ActionType.UPDATED,
+                description=f"Task '{task.title}' deadline is approaching.",
+                metadata={
+                    'deadline_event': 'deadline_approaching',
+                    'due_date': task.due_date.isoformat(),
+                    'days_until_due': days_until_due,
+                }
+            )
+
+    return notifications

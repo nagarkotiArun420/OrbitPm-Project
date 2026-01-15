@@ -41,12 +41,13 @@ class TaskListSerializer(serializers.ModelSerializer):
     assigned_to = UserMinSerializer(read_only=True)
     project_title = serializers.CharField(source='project.title', read_only=True)
     project_slug = serializers.CharField(source='project.slug', read_only=True)
+    overdue_duration = serializers.DurationField(read_only=True)
 
     class Meta:
         model = Task
         fields = (
             'id', 'title', 'slug', 'status', 'priority',
-            'due_date', 'assigned_to',
+            'due_date', 'is_overdue', 'overdue_duration', 'assigned_to',
             'project_title', 'project_slug',
             'created_at', 'is_archived',
         )
@@ -61,6 +62,7 @@ class TaskDetailSerializer(serializers.ModelSerializer):
     assigned_to = UserMinSerializer(read_only=True)
     assigned_by = UserMinSerializer(read_only=True)
     project = TaskProjectSerializer(read_only=True)
+    overdue_duration = serializers.DurationField(read_only=True)
 
     class Meta:
         model = Task
@@ -69,7 +71,7 @@ class TaskDetailSerializer(serializers.ModelSerializer):
             'status', 'priority',
             'project', 'assigned_to', 'assigned_by',
             'estimated_hours', 'actual_hours',
-            'due_date', 'completed_at',
+            'due_date', 'is_overdue', 'overdue_duration', 'completed_at',
             'is_archived', 'archived_at',
             'created_at', 'updated_at',
         )

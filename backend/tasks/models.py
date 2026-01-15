@@ -1,4 +1,5 @@
 import uuid
+from datetime import timedelta
 from django.db import models
 from django.conf import settings
 from django.utils.text import slugify
@@ -100,9 +101,41 @@ class Task(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+        indexes = [
+            models.Index(
+                fields=['is_deleted', 'is_archived', 'status', 'due_date'],
+                name='task_deadline_state_idx'
+            ),
+            models.Index(
+                fields=['due_date', 'status'],
+                name='task_due_status_idx'
+            ),
+        ]
 
     def __str__(self):
         return f"{self.title} ({self.status})"
+
+    @property
+    def is_overdue(self):
+        """
+        Indicates whether the task is active, incomplete, and past its due date.
+        """
+        return (
+            self.due_date is not None and
+            self.due_date < timezone.localdate() and
+            self.status != TaskStatus.COMPLETED and
+            not self.is_archived and
+            not self.is_deleted
+        )
+
+    @property
+    def overdue_duration(self):
+        """
+        Returns how long the task has been overdue, or zero for non-overdue tasks.
+        """
+        if not self.is_overdue:
+            return timedelta(0)
+        return timezone.localdate() - self.due_date
 
     def clean(self):
         super().clean()
@@ -218,7 +251,7 @@ class TaskComment(models.Model):
             raise ValidationError("Cannot add comments to a deleted task.")
 
         # 3. Archived tasks cannot receive new comments
-        if not self.pk and self.task.is_archived:
+        if self._state.adding and self.task.is_archived:
             raise ValidationError("Cannot add new comments to an archived task.")
 
     def save(self, *args, **kwargs):
@@ -275,7 +308,7 @@ class TaskAttachment(models.Model):
             raise ValidationError("Cannot add attachments to a deleted task.")
             
         # 2. Archived tasks cannot receive uploads
-        if not self.pk and self.task.is_archived:
+        if self._state.adding and self.task.is_archived:
             raise ValidationError("Cannot add attachments to an archived task.")
 
     def save(self, *args, **kwargs):
