@@ -78,6 +78,10 @@ def update_project(project, request=None, **validated_data):
             request=request
         )
         
+        from notifications.services import notify_project_update
+        actor = request.user if request else None
+        notify_project_update(project, actor=actor, changes=changes, request=request)
+        
     return project
 
 

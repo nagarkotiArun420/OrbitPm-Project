@@ -1,31 +1,55 @@
-from rest_framework import viewsets, permissions, status
+from rest_framework import viewsets, permissions, mixins, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from notifications.models import Notification
 from notifications.serializers import NotificationSerializer
 from notifications.permissions import IsNotificationRecipient
+from notifications.services import mark_notification_as_read, mark_all_notifications_as_read
 
-class NotificationViewSet(viewsets.ModelViewSet):
+
+class NotificationViewSet(
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    mixins.UpdateModelMixin,
+    viewsets.GenericViewSet
+):
     """
     ViewSet for viewing and managing in-app notifications.
+    Only supports listing, retrieving, and updating (PATCH/PUT) read status.
+    Preventing arbitrary POST or DELETE operations.
     """
-    queryset = Notification.objects.all().order_by('-created_at')
     serializer_class = NotificationSerializer
     permission_classes = [permissions.IsAuthenticated, IsNotificationRecipient]
 
     def get_queryset(self):
-        # Users only see notifications sent to them
-        return Notification.objects.filter(recipient=self.request.user).order_by('-created_at')
+        """
+        Users only see notifications sent to them.
+        Optimized with select_related for actor and recipient to prevent N+1 queries.
+        Utilizes custom recent() queryset helper.
+        """
+        return Notification.objects.filter(recipient=self.request.user).select_related('recipient', 'actor').recent()
 
-    @action(detail=False, methods=['post'], url_path='mark-all-read')
+    def perform_update(self, serializer):
+        """
+        Intercept standard save pipeline and route to business services.
+        Ensures is_read state changes manage read_at timestamps correctly.
+        """
+        is_read = serializer.validated_data.get('is_read')
+        if is_read is True:
+            # Delegate to our business service to set read_at
+            mark_notification_as_read(self.get_object(), request=self.request)
+        else:
+            serializer.save()
+
+    @action(detail=False, methods=['patch'], url_path='mark-all-read')
     def mark_all_read(self, request):
         """
-        Custom endpoint to mark all notifications for the authenticated user as read.
+        Custom PATCH action to mark all notifications for the authenticated user as read.
         """
-        Notification.objects.filter(recipient=request.user, is_read=False).update(is_read=True)
+        count = mark_all_notifications_as_read(request.user, request=request)
         return Response({
             'success': True,
-            'message': 'All notifications marked as read',
+            'message': f'{count} notifications marked as read',
             'data': None,
             'error': None
         }, status=status.HTTP_200_OK)

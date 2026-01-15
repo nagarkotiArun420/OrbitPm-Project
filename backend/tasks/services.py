@@ -43,6 +43,10 @@ def create_task(project, title, created_by=None, request=None, **kwargs):
         request=request
     )
     
+    if task.assigned_to:
+        from notifications.services import notify_task_assignment
+        notify_task_assignment(task, actor=actor, request=request)
+        
     return task
 
 
@@ -87,6 +91,9 @@ def update_task(task, request=None, **validated_data):
             },
             request=request
         )
+        if task.status == TaskStatus.COMPLETED:
+            from notifications.services import notify_task_completion
+            notify_task_completion(task, actor=actor, request=request)
         
     # Log assignee changed
     if old_assignee != task.assigned_to:
@@ -103,6 +110,9 @@ def update_task(task, request=None, **validated_data):
             },
             request=request
         )
+        if task.assigned_to:
+            from notifications.services import notify_task_assignment
+            notify_task_assignment(task, actor=actor, request=request)
         
     # Log general updates
     if changes:
@@ -297,6 +307,10 @@ def assign_task_to_user(task, user, assigned_by=None, request=None):
         },
         request=request
     )
+    if user:
+        from notifications.services import notify_task_assignment
+        notify_task_assignment(task, actor=actor, request=request)
+        
     return task
 
 
@@ -328,6 +342,11 @@ def transition_task_status(task, new_status, request=None):
         },
         request=request
     )
+    if new_status == TaskStatus.COMPLETED:
+        from notifications.services import notify_task_completion
+        actor = request.user if request else None
+        notify_task_completion(task, actor=actor, request=request)
+        
     return task
 
 
@@ -439,6 +458,9 @@ def create_comment(task, author, content, request=None):
         description=f"Comment added to task '{task.title}' by {author.email}.",
         request=request
     )
+    from notifications.services import notify_task_comment
+    notify_task_comment(comment, request=request)
+    
     return comment
 
 

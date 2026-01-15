@@ -13,8 +13,10 @@ class NotificationModelTests(TestCase):
         )
 
     def test_create_notification_successful(self):
+        from notifications.constants import NotificationType
         notification = Notification.objects.create(
             recipient=self.user,
+            notification_type=NotificationType.TASK_ASSIGNED,
             title='New Assignment',
             message='You have been assigned to task Alpha.',
             is_read=False
