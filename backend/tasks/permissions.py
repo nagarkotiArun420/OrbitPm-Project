@@ -170,8 +170,7 @@ class HasTaskCommentPermission(permissions.BasePermission):
 
         # MANAGER: manage comments within managed projects
         if request.user.role == User.Roles.MANAGER:
-            if request.method in ['PUT', 'PATCH']:
-                return obj.author == request.user
+            # Managers can edit/delete comments within their managed projects
             return (
                 obj.task.project.manager == request.user or
                 obj.task.project.created_by == request.user

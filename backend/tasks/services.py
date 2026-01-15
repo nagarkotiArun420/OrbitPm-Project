@@ -614,4 +614,3 @@ def delete_attachment(attachment, actor, request=None):
         },
         request=request
     )
-

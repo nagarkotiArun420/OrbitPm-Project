@@ -218,7 +218,7 @@ class TaskComment(models.Model):
             raise ValidationError("Cannot add comments to a deleted task.")
 
         # 3. Archived tasks cannot receive new comments
-        if self._state.adding and self.task.is_archived:
+        if not self.pk and self.task.is_archived:
             raise ValidationError("Cannot add new comments to an archived task.")
 
     def save(self, *args, **kwargs):
