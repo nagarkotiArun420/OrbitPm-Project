@@ -213,7 +213,7 @@ class ActivityLogTests(TestCase):
         self.assertEqual(login_logs.first().target_repr, self.manager.email)
         
         # Extract refresh token
-        refresh_token = response.data['refresh']
+        refresh_token = response.data['data']['refresh']
         
         # Log out
         url_logout = reverse('auth_logout')

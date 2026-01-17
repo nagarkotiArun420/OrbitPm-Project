@@ -50,7 +50,7 @@ class AuthViewTests(APITestCase):
         
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertFalse(response.data['success'])
-        self.assertIn('confirm_password', response.data['error'])
+        self.assertIn('confirm_password', response.data['errors'])
 
     def test_register_weak_password(self):
         """
@@ -63,7 +63,7 @@ class AuthViewTests(APITestCase):
         
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertFalse(response.data['success'])
-        self.assertIn('password', response.data['error'])
+        self.assertIn('password', response.data['errors'])
 
     def test_login_successful(self):
         """
@@ -77,10 +77,10 @@ class AuthViewTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         
         # Verify custom serializer includes user info and tokens
-        self.assertIn('access', response.data)
-        self.assertIn('refresh', response.data)
-        self.assertEqual(response.data['user']['email'], 'testuser@orbitpm.com')
-        self.assertEqual(response.data['user']['role'], 'MANAGER')
+        self.assertIn('access', response.data['data'])
+        self.assertIn('refresh', response.data['data'])
+        self.assertEqual(response.data['data']['user']['email'], 'testuser@orbitpm.com')
+        self.assertEqual(response.data['data']['user']['role'], 'MANAGER')
 
     def test_login_successful_case_insensitive(self):
         """
@@ -92,8 +92,8 @@ class AuthViewTests(APITestCase):
         }
         response = self.client.post(self.login_url, login_payload, format='json')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertIn('access', response.data)
-        self.assertEqual(response.data['user']['email'], 'testuser@orbitpm.com')
+        self.assertIn('access', response.data['data'])
+        self.assertEqual(response.data['data']['user']['email'], 'testuser@orbitpm.com')
 
     def test_login_invalid_credentials(self):
         """

@@ -170,11 +170,11 @@ class TaskAttachmentTests(APITestCase):
         self.client.force_authenticate(user=self.developer)
         response = self.client.post(self.list_url, valid_file_data, format='multipart')
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(response.data['original_filename'], "design.png")
-        self.assertEqual(response.data['mime_type'], "image/png")
+        self.assertEqual(response.data['data']['original_filename'], "design.png")
+        self.assertEqual(response.data['data']['mime_type'], "image/png")
 
         # Cleanup uploaded file
-        uploaded_id = response.data['id']
+        uploaded_id = response.data['data']['id']
         attachment = TaskAttachment.objects.get(id=uploaded_id)
         if attachment.file:
             attachment.file.delete(save=False)
@@ -187,7 +187,7 @@ class TaskAttachmentTests(APITestCase):
         response = self.client.post(self.list_url, valid_file_data, format='multipart')
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 
-        uploaded_id = response.data['id']
+        uploaded_id = response.data['data']['id']
         attachment = TaskAttachment.objects.get(id=uploaded_id)
         if attachment.file:
             attachment.file.delete(save=False)
@@ -200,7 +200,7 @@ class TaskAttachmentTests(APITestCase):
         response = self.client.post(self.list_url, valid_file_data, format='multipart')
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 
-        uploaded_id = response.data['id']
+        uploaded_id = response.data['data']['id']
         attachment = TaskAttachment.objects.get(id=uploaded_id)
         if attachment.file:
             attachment.file.delete(save=False)
@@ -275,7 +275,7 @@ class TaskAttachmentTests(APITestCase):
         archived_task_url = reverse('task-attachment-list', kwargs={'task_slug': self.archived_task.slug})
         response = self.client.post(archived_task_url, valid_file_data, format='multipart')
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("Cannot upload attachments to an archived task", response.data['error']['file'][0])
+        self.assertIn("Cannot upload attachments to an archived task", response.data['errors']['file'][0])
 
     def test_activity_logging_integration(self):
         valid_file_data = {
@@ -287,7 +287,7 @@ class TaskAttachmentTests(APITestCase):
         response = self.client.post(self.list_url, valid_file_data, format='multipart')
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 
-        attachment_id = response.data['id']
+        attachment_id = response.data['data']['id']
         log = ActivityLog.objects.filter(target_type='TASK', target_id=str(self.task.id)).latest('created_at')
         self.assertEqual(log.actor, self.developer)
         self.assertIn("Attachment 'logs.txt' was uploaded to task", log.description)

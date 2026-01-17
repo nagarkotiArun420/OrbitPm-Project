@@ -6,6 +6,7 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 
+from common.responses import success_response
 from tasks.filters import TaskFilter
 from tasks.models import Task, TaskAttachment, TaskComment
 from tasks.permissions import (
@@ -83,9 +84,10 @@ class TaskViewSet(viewsets.ModelViewSet):
         except DjangoValidationError as exc:
             raise ValidationError(exc.message_dict if hasattr(exc, 'message_dict') else exc.messages)
 
-        return Response(
-            TaskDetailSerializer(task, context=self.get_serializer_context()).data,
-            status=status.HTTP_201_CREATED
+        return success_response(
+            data=TaskDetailSerializer(task, context=self.get_serializer_context()).data,
+            message='Task created successfully',
+            status_code=status.HTTP_201_CREATED
         )
 
     def update(self, request, *args, **kwargs):
@@ -97,7 +99,10 @@ class TaskViewSet(viewsets.ModelViewSet):
             task = update_task(task, request=request, **serializer.validated_data)
         except DjangoValidationError as exc:
             raise ValidationError(exc.message_dict if hasattr(exc, 'message_dict') else exc.messages)
-        return Response(TaskDetailSerializer(task, context=self.get_serializer_context()).data)
+        return success_response(
+            data=TaskDetailSerializer(task, context=self.get_serializer_context()).data,
+            message='Task updated successfully'
+        )
 
     def destroy(self, request, *args, **kwargs):
         task = self.get_object()
@@ -113,7 +118,10 @@ class TaskViewSet(viewsets.ModelViewSet):
             task = archive_task(self.get_object(), request=request)
         except DjangoValidationError as exc:
             raise ValidationError(exc.message_dict if hasattr(exc, 'message_dict') else exc.messages)
-        return Response(TaskDetailSerializer(task, context=self.get_serializer_context()).data)
+        return success_response(
+            data=TaskDetailSerializer(task, context=self.get_serializer_context()).data,
+            message='Task archived successfully'
+        )
 
     @action(detail=True, methods=['post'])
     def restore(self, request, slug=None):
@@ -121,7 +129,10 @@ class TaskViewSet(viewsets.ModelViewSet):
             task = restore_task(self.get_object(), request=request)
         except DjangoValidationError as exc:
             raise PermissionDenied(str(exc))
-        return Response(TaskDetailSerializer(task, context=self.get_serializer_context()).data)
+        return success_response(
+            data=TaskDetailSerializer(task, context=self.get_serializer_context()).data,
+            message='Task restored successfully'
+        )
 
     @action(detail=True, methods=['post'])
     def unarchive(self, request, slug=None):
@@ -129,7 +140,10 @@ class TaskViewSet(viewsets.ModelViewSet):
             task = unarchive_task(self.get_object(), request=request)
         except DjangoValidationError as exc:
             raise ValidationError(exc.message_dict if hasattr(exc, 'message_dict') else exc.messages)
-        return Response(TaskDetailSerializer(task, context=self.get_serializer_context()).data)
+        return success_response(
+            data=TaskDetailSerializer(task, context=self.get_serializer_context()).data,
+            message='Task unarchived successfully'
+        )
 
 
 class TaskCommentViewSet(viewsets.ModelViewSet):
@@ -167,9 +181,10 @@ class TaskCommentViewSet(viewsets.ModelViewSet):
             )
         except DjangoValidationError as exc:
             raise ValidationError(exc.message_dict if hasattr(exc, 'message_dict') else exc.messages)
-        return Response(
-            self.get_serializer(comment).data,
-            status=status.HTTP_201_CREATED
+        return success_response(
+            data=self.get_serializer(comment).data,
+            message='Comment created successfully',
+            status_code=status.HTTP_201_CREATED
         )
 
     def partial_update(self, request, *args, **kwargs):
@@ -185,7 +200,10 @@ class TaskCommentViewSet(viewsets.ModelViewSet):
             )
         except DjangoValidationError as exc:
             raise ValidationError(exc.message_dict if hasattr(exc, 'message_dict') else exc.messages)
-        return Response(self.get_serializer(comment).data)
+        return success_response(
+            data=self.get_serializer(comment).data,
+            message='Comment updated successfully'
+        )
 
     def destroy(self, request, *args, **kwargs):
         try:
@@ -229,9 +247,10 @@ class TaskAttachmentViewSet(viewsets.ModelViewSet):
             )
         except DjangoValidationError as exc:
             raise ValidationError({'file': exc.messages})
-        return Response(
-            self.get_serializer(attachment).data,
-            status=status.HTTP_201_CREATED
+        return success_response(
+            data=self.get_serializer(attachment).data,
+            message='Attachment uploaded successfully',
+            status_code=status.HTTP_201_CREATED
         )
 
     def destroy(self, request, *args, **kwargs):

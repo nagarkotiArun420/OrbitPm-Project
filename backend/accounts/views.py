@@ -1,6 +1,5 @@
 from rest_framework import status, permissions
 from rest_framework.views import APIView
-from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -8,6 +7,7 @@ from rest_framework_simplejwt.exceptions import TokenError, InvalidToken
 from django.contrib.auth import get_user_model
 from common.services import log_activity
 from common.constants import ActionType, TargetType
+from common.responses import error_response, success_response
 
 from accounts.serializers import (
     RegisterSerializer, 
@@ -44,7 +44,7 @@ class CustomTokenObtainPairView(TokenObtainPairView):
             request=request
         )
 
-        return Response(serializer.validated_data, status=status.HTTP_200_OK)
+        return success_response(serializer.validated_data, message='Login successful')
 
 class CustomTokenRefreshView(TokenRefreshView):
     """
@@ -63,19 +63,17 @@ class RegisterView(APIView):
         if serializer.is_valid():
             user = serializer.save()
             user_data = UserSerializer(user).data
-            return Response({
-                'success': True,
-                'message': 'User registered successfully',
-                'data': user_data,
-                'error': None
-            }, status=status.HTTP_201_CREATED)
+            return success_response(
+                data=user_data,
+                message='User registered successfully',
+                status_code=status.HTTP_201_CREATED
+            )
             
-        return Response({
-            'success': False,
-            'message': 'Registration failed',
-            'data': None,
-            'error': serializer.errors
-        }, status=status.HTTP_400_BAD_REQUEST)
+        return error_response(
+            errors=serializer.errors,
+            message='Registration failed',
+            status_code=status.HTTP_400_BAD_REQUEST
+        )
 
 class UserProfileView(APIView):
     """
@@ -86,29 +84,18 @@ class UserProfileView(APIView):
 
     def get(self, request):
         serializer = UserSerializer(request.user)
-        return Response({
-            'success': True,
-            'message': 'Profile details retrieved',
-            'data': serializer.data,
-            'error': None
-        })
+        return success_response(serializer.data, message='Profile details retrieved')
 
     def patch(self, request):
         serializer = UserSerializer(request.user, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
-            return Response({
-                'success': True,
-                'message': 'Profile updated successfully',
-                'data': serializer.data,
-                'error': None
-            })
-        return Response({
-            'success': False,
-            'message': 'Profile update failed',
-            'data': None,
-            'error': serializer.errors
-        }, status=status.HTTP_400_BAD_REQUEST)
+            return success_response(serializer.data, message='Profile updated successfully')
+        return error_response(
+            errors=serializer.errors,
+            message='Profile update failed',
+            status_code=status.HTTP_400_BAD_REQUEST
+        )
 
 class LogoutView(APIView):
     """
@@ -120,12 +107,11 @@ class LogoutView(APIView):
         try:
             refresh_token = request.data.get("refresh")
             if not refresh_token:
-                return Response({
-                    'success': False,
-                    'message': 'Refresh token is required',
-                    'data': None,
-                    'error': {'code': 'bad_request', 'detail': 'refresh token field is required'}
-                }, status=status.HTTP_400_BAD_REQUEST)
+                return error_response(
+                    errors={'code': 'bad_request', 'detail': 'refresh token field is required'},
+                    message='Refresh token is required',
+                    status_code=status.HTTP_400_BAD_REQUEST
+                )
                 
             token = RefreshToken(refresh_token)
             token.blacklist()
@@ -142,23 +128,16 @@ class LogoutView(APIView):
                 request=request
             )
             
-            return Response({
-                'success': True,
-                'message': 'Successfully logged out',
-                'data': None,
-                'error': None
-            }, status=status.HTTP_200_OK)
+            return success_response(message='Successfully logged out')
         except TokenError as e:
-            return Response({
-                'success': False,
-                'message': 'Invalid token or token already blacklisted',
-                'data': None,
-                'error': {'code': 'invalid_token', 'detail': str(e)}
-            }, status=status.HTTP_400_BAD_REQUEST)
+            return error_response(
+                errors={'code': 'invalid_token', 'detail': str(e)},
+                message='Invalid token or token already blacklisted',
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
         except Exception as e:
-            return Response({
-                'success': False,
-                'message': 'An unexpected error occurred during logout',
-                'data': None,
-                'error': {'code': 'server_error', 'detail': str(e)}
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return error_response(
+                errors={'code': 'server_error', 'detail': str(e)},
+                message='An unexpected error occurred during logout',
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

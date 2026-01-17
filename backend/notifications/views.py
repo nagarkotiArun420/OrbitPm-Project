@@ -1,6 +1,6 @@
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
-from rest_framework.response import Response
+from common.responses import success_response
 from notifications.models import Notification
 from notifications.serializers import NotificationSerializer
 from notifications.permissions import IsNotificationRecipient
@@ -23,9 +23,7 @@ class NotificationViewSet(viewsets.ModelViewSet):
         Custom endpoint to mark all notifications for the authenticated user as read.
         """
         Notification.objects.filter(recipient=request.user, is_read=False).update(is_read=True)
-        return Response({
-            'success': True,
-            'message': 'All notifications marked as read',
-            'data': None,
-            'error': None
-        }, status=status.HTTP_200_OK)
+        return success_response(
+            message='All notifications marked as read',
+            status_code=status.HTTP_200_OK
+        )

@@ -117,7 +117,7 @@ class TaskCommentTests(APITestCase):
         self.client.force_authenticate(user=self.developer)
         response = self.client.post(self.list_url, comment_data)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(response.data['content'], 'This is a test comment.')
+        self.assertEqual(response.data['data']['content'], 'This is a test comment.')
 
         # 4. Manager of project - should succeed (201)
         self.client.force_authenticate(user=self.manager)
@@ -192,7 +192,7 @@ class TaskCommentTests(APITestCase):
         self.assertIn("Comment added to task", log.description)
 
         # 2. Activity log on comment update
-        comment_id = response.data['id']
+        comment_id = response.data['data']['id']
         detail_url = reverse('task-comment-detail', kwargs={'task_slug': self.task.slug, 'pk': comment_id})
         response = self.client.patch(detail_url, {'content': 'Updated log.'})
         self.assertEqual(response.status_code, status.HTTP_200_OK)

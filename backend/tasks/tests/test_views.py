@@ -176,7 +176,7 @@ class TaskAPITests(APITestCase):
         # 3. Archive completed task
         response = self.client.patch(detail_url, {'is_archived': True})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertTrue(response.data['is_archived'])
+        self.assertTrue(response.data['data']['is_archived'])
         
         # 4. Excluded from default list
         response = self.client.get(self.list_url)
