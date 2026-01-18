@@ -6,7 +6,7 @@ DEFAULT_SUCCESS_MESSAGE = 'Operation completed successfully'
 DEFAULT_ERROR_MESSAGE = 'Request could not be processed'
 
 
-def build_response_payload(success, message, data=None, errors=None):
+def build_response_payload(success, message, data=None, errors=None, status_code=None):
     """
     Builds the standard OrbitPM API response envelope.
     """
@@ -15,6 +15,7 @@ def build_response_payload(success, message, data=None, errors=None):
         'message': message,
         'data': data,
         'errors': errors,
+        'status_code': status_code,
     }
 
 
@@ -28,6 +29,7 @@ def success_response(data=None, message=DEFAULT_SUCCESS_MESSAGE, status_code=sta
             message=message,
             data=data,
             errors=None,
+            status_code=status_code,
         ),
         status=status_code,
     )
@@ -43,6 +45,7 @@ def error_response(errors=None, message=DEFAULT_ERROR_MESSAGE, status_code=statu
             message=message,
             data=None,
             errors=errors or {},
+            status_code=status_code,
         ),
         status=status_code,
     )
@@ -51,7 +54,7 @@ def error_response(errors=None, message=DEFAULT_ERROR_MESSAGE, status_code=statu
 def is_standard_response(data):
     return (
         isinstance(data, dict) and
-        {'success', 'message', 'data', 'errors'}.issubset(data.keys())
+        {'success', 'message', 'data', 'errors', 'status_code'}.issubset(data.keys())
     )
 
 

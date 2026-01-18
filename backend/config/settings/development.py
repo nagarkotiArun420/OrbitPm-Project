@@ -32,3 +32,16 @@ else:
 
 # Email Backend - Console for development
 EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+
+# ---------------------------------------------------------------------------
+# Development Logging Overrides
+# ---------------------------------------------------------------------------
+# In development we only log to the console at DEBUG level.
+# File handlers are disabled to avoid cluttering the local filesystem.
+LOGGING['handlers']['console']['level'] = 'DEBUG'
+
+# Disable file handlers in development (remove them from all loggers).
+for _logger_cfg in LOGGING['loggers'].values():
+    _logger_cfg['handlers'] = [
+        h for h in _logger_cfg.get('handlers', []) if h == 'console'
+    ]

@@ -42,3 +42,16 @@ EMAIL_PORT = int(os.getenv('EMAIL_PORT', '587'))
 EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '')
 EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
 EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True') == 'True'
+
+# ---------------------------------------------------------------------------
+# Production Logging Overrides
+# ---------------------------------------------------------------------------
+# Ensure the log directory exists in production.
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+# Console: INFO level in production (no DEBUG noise).
+LOGGING['handlers']['console']['level'] = 'INFO'
+
+# File handlers: use JSON formatter for structured log ingestion.
+LOGGING['handlers']['file']['formatter'] = 'json'
+LOGGING['handlers']['error_file']['formatter'] = 'json'
