@@ -33,7 +33,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
         Dynamically filter project listings to enforce strict data isolation per role.
         Utilizes selectors layer to enforce role-specific visibility and optimize queries.
         """
-        return get_authorized_projects(self.request.user)
+        return get_authorized_projects(self.request.user, action=self.action)
 
     def get_serializer_class(self):
         """

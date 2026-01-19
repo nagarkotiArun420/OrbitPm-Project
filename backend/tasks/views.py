@@ -51,7 +51,7 @@ class TaskViewSet(viewsets.ModelViewSet):
     ordering = ('-created_at',)
 
     def get_queryset(self):
-        queryset = get_authorized_tasks(self.request.user)
+        queryset = get_authorized_tasks(self.request.user, action=self.action)
 
         if self.action == 'restore':
             return queryset.order_by('-created_at')
@@ -155,18 +155,18 @@ class TaskCommentViewSet(viewsets.ModelViewSet):
 
     def get_task(self):
         return get_object_or_404(
-            get_authorized_tasks(self.request.user).active(),
+            get_authorized_tasks(self.request.user, action='detail').active(),
             slug=self.kwargs['task_slug']
         )
 
     def get_queryset(self):
-        if self.action == 'retrieve':
+        if self.action != 'list':
             return TaskComment.objects.filter(
                 task__slug=self.kwargs['task_slug']
-            ).select_related('author', 'task')
+            ).select_related('author', 'task__project__manager', 'task__project__created_by')
         return TaskComment.objects.active().filter(
             task__slug=self.kwargs['task_slug']
-        ).select_related('author', 'task')
+        ).select_related('author')
 
     def create(self, request, *args, **kwargs):
         task = self.get_task()
@@ -223,14 +223,18 @@ class TaskAttachmentViewSet(viewsets.ModelViewSet):
 
     def get_task(self):
         return get_object_or_404(
-            get_authorized_tasks(self.request.user).filter(is_deleted=False),
+            get_authorized_tasks(self.request.user, action='detail').filter(is_deleted=False),
             slug=self.kwargs['task_slug']
         )
 
     def get_queryset(self):
+        if self.action != 'list':
+            return TaskAttachment.objects.filter(
+                task__slug=self.kwargs['task_slug']
+            ).select_related('task__project__manager', 'task__project__created_by', 'uploaded_by')
         return TaskAttachment.objects.filter(
             task__slug=self.kwargs['task_slug']
-        ).select_related('task', 'uploaded_by')
+        ).select_related('uploaded_by')
 
     def create(self, request, *args, **kwargs):
         task = self.get_task()

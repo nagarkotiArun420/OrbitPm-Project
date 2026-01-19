@@ -15,7 +15,9 @@ class NotificationViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         # Users only see notifications sent to them
-        return Notification.objects.filter(recipient=self.request.user).order_by('-created_at')
+        return Notification.objects.filter(recipient=self.request.user).only(
+            'id', 'recipient_id', 'title', 'message', 'is_read', 'created_at'
+        ).order_by('-created_at')
 
     @action(detail=False, methods=['post'], url_path='mark-all-read')
     def mark_all_read(self, request):

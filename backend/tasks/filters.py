@@ -1,4 +1,8 @@
 from django_filters import rest_framework as filters
+from django.db.models import Q
+from django.utils import timezone
+from datetime import timedelta
+from tasks.constants import TaskStatus
 from tasks.models import Task
 
 class TaskFilter(filters.FilterSet):
@@ -23,21 +27,34 @@ class TaskFilter(filters.FilterSet):
         if value is True:
             return queryset.overdue()
         if value is False:
-            return queryset.exclude(pk__in=queryset.overdue().values('pk'))
+            reference_date = timezone.localdate()
+            return queryset.exclude(
+                Q(due_date__lt=reference_date, is_archived=False, is_deleted=False) & 
+                ~Q(status=TaskStatus.COMPLETED)
+            )
         return queryset
 
     def filter_due_today(self, queryset, name, value):
         if value is True:
             return queryset.due_today()
         if value is False:
-            return queryset.exclude(pk__in=queryset.due_today().values('pk'))
+            reference_date = timezone.localdate()
+            return queryset.exclude(
+                Q(due_date=reference_date, is_archived=False, is_deleted=False) & 
+                ~Q(status=TaskStatus.COMPLETED)
+            )
         return queryset
 
     def filter_upcoming_deadlines(self, queryset, name, value):
         if value is True:
             return queryset.upcoming_deadlines()
         if value is False:
-            return queryset.exclude(pk__in=queryset.upcoming_deadlines().values('pk'))
+            reference_date = timezone.localdate()
+            end_date = reference_date + timedelta(days=3)
+            return queryset.exclude(
+                Q(due_date__gt=reference_date, due_date__lte=end_date, is_archived=False, is_deleted=False) & 
+                ~Q(status=TaskStatus.COMPLETED)
+            )
         return queryset
 
     def filter_upcoming_days(self, queryset, name, value):

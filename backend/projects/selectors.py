@@ -2,7 +2,7 @@ from django.db.models import Q
 from accounts.models import User
 from projects.models import Project
 
-def get_authorized_projects(user):
+def get_authorized_projects(user, action='detail'):
     """
     Decoupled selector logic to fetch authorized projects for a user.
     Enforces strict role-based visibility rules and applies query optimizations
@@ -12,9 +12,16 @@ def get_authorized_projects(user):
         return Project.objects.none()
 
     # Base optimized query
-    queryset = Project.objects.select_related(
-        'manager', 'client', 'created_by'
-    ).prefetch_related('team_members')
+    if action == 'list':
+        queryset = Project.objects.select_related('manager').only(
+            'id', 'title', 'slug', 'status', 'priority', 'deadline', 'created_at',
+            'manager__id', 'manager__email', 'manager__full_name', 'manager__role', 'manager__avatar',
+            'created_by_id', 'client_id'
+        )
+    else:
+        queryset = Project.objects.select_related(
+            'manager', 'client', 'created_by'
+        ).prefetch_related('team_members')
 
     # ADMIN possesses full visibility of all records
     if user.role == User.Roles.ADMIN:
@@ -38,3 +45,4 @@ def get_authorized_projects(user):
         return queryset.filter(client=user)
 
     return Project.objects.none()
+
