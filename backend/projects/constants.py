@@ -12,3 +12,9 @@ class ProjectPriority(models.TextChoices):
     MEDIUM = 'MEDIUM', 'Medium'
     HIGH = 'HIGH', 'High'
     URGENT = 'URGENT', 'Urgent'
+
+class ProjectMemberRole(models.TextChoices):
+    MANAGER = 'MANAGER', 'Manager'
+    DEVELOPER = 'DEVELOPER', 'Developer'
+    CLIENT = 'CLIENT', 'Client'
+    VIEWER = 'VIEWER', 'Viewer'

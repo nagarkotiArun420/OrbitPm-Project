@@ -4,7 +4,7 @@ from django.conf import settings
 from django.utils.text import slugify
 from django.utils import timezone
 from django.core.exceptions import ValidationError
-from projects.constants import ProjectStatus, ProjectPriority
+from projects.constants import ProjectStatus, ProjectPriority, ProjectMemberRole
 from projects.validators import validate_budget_positive
 
 class Project(models.Model):
@@ -108,3 +108,54 @@ class Project(models.Model):
             
         self.full_clean()
         super().save(*args, **kwargs)
+
+
+class ProjectMember(models.Model):
+    """
+    ProjectMember represents a user's membership within a specific project.
+    Enables granular role-based team management at the project level.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    project = models.ForeignKey(
+        Project,
+        on_delete=models.CASCADE,
+        related_name='memberships'
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='project_memberships'
+    )
+    role = models.CharField(
+        max_length=20,
+        choices=ProjectMemberRole.choices,
+        default=ProjectMemberRole.DEVELOPER,
+        db_index=True
+    )
+    joined_at = models.DateTimeField(auto_now_add=True)
+    invited_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='invited_memberships'
+    )
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        unique_together = ('project', 'user')
+        ordering = ['-joined_at']
+        indexes = [
+            models.Index(fields=['project', 'role']),
+        ]
+
+    def __str__(self):
+        return f"{self.user.email} - {self.role} on {self.project.title}"
+
+    def clean(self):
+        super().clean()
+        if self.user_id and hasattr(self, 'user') and not self.user.is_active:
+            raise ValidationError({
+                'user': 'Inactive users cannot be added as project members.'
+            })
+

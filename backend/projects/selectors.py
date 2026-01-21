@@ -21,7 +21,7 @@ def get_authorized_projects(user, action='detail'):
     else:
         queryset = Project.objects.select_related(
             'manager', 'client', 'created_by'
-        ).prefetch_related('team_members')
+        ).prefetch_related('team_members', 'memberships', 'memberships__user')
 
     # ADMIN possesses full visibility of all records
     if user.role == User.Roles.ADMIN:

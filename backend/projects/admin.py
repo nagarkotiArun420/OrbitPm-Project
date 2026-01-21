@@ -1,5 +1,5 @@
 from django.contrib import admin
-from projects.models import Project
+from projects.models import Project, ProjectMember
 
 @admin.register(Project)
 class ProjectAdmin(admin.ModelAdmin):
@@ -25,3 +25,20 @@ class ProjectAdmin(admin.ModelAdmin):
         if not change and not obj.created_by:
             obj.created_by = request.user
         super().save_model(request, obj, form, change)
+
+
+@admin.register(ProjectMember)
+class ProjectMemberAdmin(admin.ModelAdmin):
+    """
+    Admin configuration for ProjectMember model.
+    """
+    list_display = ('user', 'project', 'role', 'is_active', 'invited_by', 'joined_at')
+    list_filter = ('role', 'is_active', 'joined_at')
+    search_fields = (
+        'user__email', 'user__full_name',
+        'project__title', 'invited_by__email'
+    )
+    autocomplete_fields = ('user', 'project', 'invited_by')
+    readonly_fields = ('joined_at',)
+    ordering = ('-joined_at',)
+

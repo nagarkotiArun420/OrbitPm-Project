@@ -8,8 +8,12 @@ class ActionType(models.TextChoices):
     ASSIGNED = 'ASSIGNED', 'Assigned'
     LOGIN = 'LOGIN', 'Login'
     LOGOUT = 'LOGOUT', 'Logout'
+    MEMBER_ADDED = 'MEMBER_ADDED', 'Member Added'
+    MEMBER_REMOVED = 'MEMBER_REMOVED', 'Member Removed'
+    MEMBER_ROLE_UPDATED = 'MEMBER_ROLE_UPDATED', 'Member Role Updated'
 
 class TargetType(models.TextChoices):
     PROJECT = 'PROJECT', 'Project'
     TASK = 'TASK', 'Task'
     USER = 'USER', 'User'
+    PROJECT_MEMBER = 'PROJECT_MEMBER', 'Project Member'

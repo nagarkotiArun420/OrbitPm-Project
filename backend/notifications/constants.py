@@ -8,3 +8,7 @@ class NotificationType(models.TextChoices):
     TASK_OVERDUE = 'TASK_OVERDUE', 'Task Overdue'
     TASK_DEADLINE_APPROACHING = 'TASK_DEADLINE_APPROACHING', 'Task Deadline Approaching'
     PROJECT_UPDATED = 'PROJECT_UPDATED', 'Project Updated'
+    MEMBER_ADDED = 'MEMBER_ADDED', 'Member Added'
+    MEMBER_ROLE_UPDATED = 'MEMBER_ROLE_UPDATED', 'Member Role Updated'
+    MEMBER_REMOVED = 'MEMBER_REMOVED', 'Member Removed'
+

@@ -109,3 +109,45 @@ class ProjectUpdateSerializer(ProjectCreateSerializer):
 # Legacy compatibility alias for initial scaffold views (will be fully refactored in views development)
 ProjectSerializer = ProjectDetailSerializer
 
+
+class ProjectMemberSerializer(serializers.ModelSerializer):
+    """
+    Serializer for ProjectMember model. Expands user and invited_by
+    via UserMinSerializer for reads, and accepts user_id for writes.
+    """
+    user = UserMinSerializer(read_only=True)
+    invited_by = UserMinSerializer(read_only=True)
+    user_id = serializers.UUIDField(write_only=True, required=True)
+
+    class Meta:
+        from projects.models import ProjectMember
+        model = ProjectMember
+        fields = (
+            'id', 'user', 'user_id', 'role', 'joined_at',
+            'invited_by', 'is_active'
+        )
+        read_only_fields = ('id', 'joined_at', 'invited_by', 'is_active')
+
+    def validate_user_id(self, value):
+        try:
+            user = User.objects.get(id=value)
+        except User.DoesNotExist:
+            raise serializers.ValidationError("User with this ID does not exist.")
+
+        if not user.is_active:
+            raise serializers.ValidationError("Inactive users cannot be added as project members.")
+
+        return value
+
+    def validate(self, attrs):
+        from projects.models import ProjectMember
+        user_id = attrs.get('user_id')
+        project = self.context.get('project')
+
+        if project and user_id:
+            if ProjectMember.objects.filter(project=project, user_id=user_id).exists():
+                raise serializers.ValidationError({
+                    'user_id': 'This user is already a member of this project.'
+                })
+
+        return attrs
