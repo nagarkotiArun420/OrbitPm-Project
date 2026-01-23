@@ -66,6 +66,18 @@ class TaskFilter(filters.FilterSet):
             return queryset.none()
         return queryset.upcoming_deadlines(days=days)
 
+    label = filters.UUIDFilter(field_name='labels__id', label='Filter by label ID')
+    labels = filters.CharFilter(method='filter_labels', label='Filter by multiple label IDs (comma-separated)')
+
+    def filter_labels(self, queryset, name, value):
+        """Filter tasks that have ALL of the specified labels."""
+        label_ids = [uid.strip() for uid in value.split(',') if uid.strip()]
+        if not label_ids:
+            return queryset
+        for lid in label_ids:
+            queryset = queryset.filter(labels__id=lid)
+        return queryset.distinct()
+
     class Meta:
         model = Task
         fields = {
@@ -75,3 +87,4 @@ class TaskFilter(filters.FilterSet):
             'project': ['exact'],
             'is_archived': ['exact'],
         }
+

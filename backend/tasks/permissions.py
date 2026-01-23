@@ -255,3 +255,38 @@ class HasTaskAttachmentPermission(permissions.BasePermission):
             return obj.task.assigned_to == request.user
 
         return False
+
+
+class HasTaskLabelPermission(permissions.BasePermission):
+    """
+    Role-based permission for TaskLabel CRUD:
+    - ADMIN: full access
+    - MANAGER: CRUD labels in managed/created projects
+    - DEVELOPER: read-only
+    - CLIENT: read-only
+    """
+    def has_permission(self, request, view):
+        if not request.user or not request.user.is_authenticated:
+            return False
+
+        # Read-only methods are allowed for all authenticated users
+        if request.method in permissions.SAFE_METHODS:
+            return True
+
+        # Write methods require ADMIN or MANAGER role
+        return request.user.role in (User.Roles.ADMIN, User.Roles.MANAGER)
+
+    def has_object_permission(self, request, view, obj):
+        if request.method in permissions.SAFE_METHODS:
+            return True
+
+        if request.user.role == User.Roles.ADMIN:
+            return True
+
+        if request.user.role == User.Roles.MANAGER:
+            return (
+                obj.project.manager == request.user or
+                obj.project.created_by == request.user
+            )
+
+        return False

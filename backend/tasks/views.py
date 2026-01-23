@@ -8,11 +8,12 @@ from rest_framework.response import Response
 
 from common.responses import success_response
 from tasks.filters import TaskFilter
-from tasks.models import Task, TaskAttachment, TaskComment
+from tasks.models import Task, TaskAttachment, TaskComment, TaskLabel
 from tasks.permissions import (
     HasTaskAttachmentPermission,
     HasTaskCommentPermission,
     HasTaskPermission,
+    HasTaskLabelPermission,
 )
 from tasks.selectors import get_authorized_tasks
 from tasks.serializers import (
@@ -22,6 +23,9 @@ from tasks.serializers import (
     TaskDetailSerializer,
     TaskListSerializer,
     TaskUpdateSerializer,
+    TaskLabelSerializer,
+    TaskLabelUpdateSerializer,
+    TaskLabelAssignSerializer,
 )
 from tasks.services import (
     archive_task,
@@ -35,6 +39,11 @@ from tasks.services import (
     unarchive_task,
     update_comment,
     update_task,
+    create_label,
+    update_label,
+    delete_label,
+    assign_labels_to_task,
+    remove_labels_from_task,
 )
 
 
@@ -143,6 +152,46 @@ class TaskViewSet(viewsets.ModelViewSet):
         return success_response(
             data=TaskDetailSerializer(task, context=self.get_serializer_context()).data,
             message='Task unarchived successfully'
+        )
+
+    @action(detail=True, methods=['post'], url_path='labels/assign')
+    def assign_labels(self, request, slug=None):
+        task = self.get_object()
+        serializer = TaskLabelAssignSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            task = assign_labels_to_task(
+                task=task,
+                label_ids=serializer.validated_data['label_ids'],
+                actor=request.user,
+                request=request
+            )
+        except DjangoValidationError as exc:
+            raise ValidationError(exc.message_dict if hasattr(exc, 'message_dict') else exc.messages)
+        
+        return success_response(
+            data=TaskDetailSerializer(task, context=self.get_serializer_context()).data,
+            message='Labels assigned successfully'
+        )
+
+    @action(detail=True, methods=['post'], url_path='labels/remove')
+    def remove_labels(self, request, slug=None):
+        task = self.get_object()
+        serializer = TaskLabelAssignSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            task = remove_labels_from_task(
+                task=task,
+                label_ids=serializer.validated_data['label_ids'],
+                actor=request.user,
+                request=request
+            )
+        except DjangoValidationError as exc:
+            raise ValidationError(exc.message_dict if hasattr(exc, 'message_dict') else exc.messages)
+            
+        return success_response(
+            data=TaskDetailSerializer(task, context=self.get_serializer_context()).data,
+            message='Labels removed successfully'
         )
 
 
@@ -260,6 +309,75 @@ class TaskAttachmentViewSet(viewsets.ModelViewSet):
     def destroy(self, request, *args, **kwargs):
         try:
             delete_attachment(self.get_object(), actor=request.user, request=request)
+        except DjangoValidationError as exc:
+            raise ValidationError(exc.message_dict if hasattr(exc, 'message_dict') else exc.messages)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class TaskLabelViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for TaskLabel CRUD.
+    Only authorized users can manage labels within a project.
+    """
+    lookup_field = 'slug'
+    permission_classes = [permissions.IsAuthenticated, HasTaskLabelPermission]
+    filter_backends = (DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter)
+    search_fields = ('name', 'description')
+    ordering_fields = ('name', 'created_at')
+    ordering = ('name',)
+    
+    def get_queryset(self):
+        from projects.selectors import get_authorized_projects
+        projects = get_authorized_projects(self.request.user, action='list')
+        return TaskLabel.objects.filter(project__in=projects)
+
+    def get_serializer_class(self):
+        if self.action in ('update', 'partial_update'):
+            return TaskLabelUpdateSerializer
+        return TaskLabelSerializer
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            label = create_label(
+                actor=request.user,
+                request=request,
+                **serializer.validated_data
+            )
+        except DjangoValidationError as exc:
+            raise ValidationError(exc.message_dict if hasattr(exc, 'message_dict') else exc.messages)
+            
+        return success_response(
+            data=TaskLabelSerializer(label, context=self.get_serializer_context()).data,
+            message='Label created successfully',
+            status_code=status.HTTP_201_CREATED
+        )
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop('partial', False)
+        label = self.get_object()
+        serializer = self.get_serializer(label, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        try:
+            label = update_label(
+                label=label,
+                actor=request.user,
+                request=request,
+                **serializer.validated_data
+            )
+        except DjangoValidationError as exc:
+            raise ValidationError(exc.message_dict if hasattr(exc, 'message_dict') else exc.messages)
+            
+        return success_response(
+            data=TaskLabelSerializer(label, context=self.get_serializer_context()).data,
+            message='Label updated successfully'
+        )
+
+    def destroy(self, request, *args, **kwargs):
+        label = self.get_object()
+        try:
+            delete_label(label, actor=request.user, request=request)
         except DjangoValidationError as exc:
             raise ValidationError(exc.message_dict if hasattr(exc, 'message_dict') else exc.messages)
         return Response(status=status.HTTP_204_NO_CONTENT)

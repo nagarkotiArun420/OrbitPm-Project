@@ -11,6 +11,8 @@ class ActionType(models.TextChoices):
     MEMBER_ADDED = 'MEMBER_ADDED', 'Member Added'
     MEMBER_REMOVED = 'MEMBER_REMOVED', 'Member Removed'
     MEMBER_ROLE_UPDATED = 'MEMBER_ROLE_UPDATED', 'Member Role Updated'
+    LABEL_ASSIGNED = 'LABEL_ASSIGNED', 'Label Assigned'
+    LABEL_REMOVED = 'LABEL_REMOVED', 'Label Removed'
 
 class TargetType(models.TextChoices):
     PROJECT = 'PROJECT', 'Project'

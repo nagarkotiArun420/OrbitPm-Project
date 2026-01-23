@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from tasks.models import Task, TaskComment, TaskAttachment
+from tasks.models import Task, TaskComment, TaskAttachment, TaskLabel
 from tasks.constants import TaskStatus
 from tasks.validators import (
     ALLOWED_TRANSITIONS,
@@ -33,6 +33,14 @@ class TaskProjectSerializer(serializers.Serializer):
 # Read Serializers
 # ──────────────────────────────────────────────────────────────
 
+class TaskLabelInlineSerializer(serializers.ModelSerializer):
+    """Lightweight label representation for embedding in task responses."""
+    class Meta:
+        model = TaskLabel
+        fields = ('id', 'name', 'slug', 'color')
+        read_only_fields = fields
+
+
 class TaskListSerializer(serializers.ModelSerializer):
     """
     Serializer optimized for listing tasks.
@@ -42,6 +50,7 @@ class TaskListSerializer(serializers.ModelSerializer):
     project_title = serializers.CharField(source='project.title', read_only=True)
     project_slug = serializers.CharField(source='project.slug', read_only=True)
     overdue_duration = serializers.DurationField(read_only=True)
+    labels = TaskLabelInlineSerializer(many=True, read_only=True)
 
     class Meta:
         model = Task
@@ -49,6 +58,7 @@ class TaskListSerializer(serializers.ModelSerializer):
             'id', 'title', 'slug', 'status', 'priority',
             'due_date', 'is_overdue', 'overdue_duration', 'assigned_to',
             'project_title', 'project_slug',
+            'labels',
             'created_at', 'is_archived',
         )
         read_only_fields = fields
@@ -63,6 +73,7 @@ class TaskDetailSerializer(serializers.ModelSerializer):
     assigned_by = UserMinSerializer(read_only=True)
     project = TaskProjectSerializer(read_only=True)
     overdue_duration = serializers.DurationField(read_only=True)
+    labels = TaskLabelInlineSerializer(many=True, read_only=True)
 
     class Meta:
         model = Task
@@ -72,6 +83,7 @@ class TaskDetailSerializer(serializers.ModelSerializer):
             'project', 'assigned_to', 'assigned_by',
             'estimated_hours', 'actual_hours',
             'due_date', 'is_overdue', 'overdue_duration', 'completed_at',
+            'labels',
             'is_archived', 'archived_at',
             'created_at', 'updated_at',
         )
@@ -280,3 +292,61 @@ class TaskAttachmentSerializer(serializers.ModelSerializer):
             'mime_type',
             'uploaded_at',
         ]
+
+
+# ──────────────────────────────────────────────────────────────
+# Task Label Serializers
+# ──────────────────────────────────────────────────────────────
+
+class TaskLabelSerializer(serializers.ModelSerializer):
+    """Full CRUD serializer for TaskLabel."""
+    class Meta:
+        model = TaskLabel
+        fields = (
+            'id', 'name', 'slug', 'color', 'description',
+            'project', 'created_at',
+        )
+        read_only_fields = ('id', 'slug', 'created_at')
+
+    def validate(self, attrs):
+        project = attrs.get('project') or (self.instance.project if self.instance else None)
+        name = attrs.get('name') or (self.instance.name if self.instance else None)
+        if project and name:
+            from django.utils.text import slugify
+            slug = slugify(name)
+            qs = TaskLabel.objects.filter(project=project, slug=slug)
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError(
+                    {'name': f"A label with name '{name}' already exists in this project."}
+                )
+        return attrs
+
+
+class TaskLabelUpdateSerializer(serializers.ModelSerializer):
+    """Update serializer — project is immutable after creation."""
+    class Meta:
+        model = TaskLabel
+        fields = ('name', 'color', 'description')
+
+    def validate_name(self, value):
+        if self.instance:
+            from django.utils.text import slugify
+            slug = slugify(value)
+            if TaskLabel.objects.filter(
+                project=self.instance.project, slug=slug
+            ).exclude(pk=self.instance.pk).exists():
+                raise serializers.ValidationError(
+                    f"A label with name '{value}' already exists in this project."
+                )
+        return value
+
+
+class TaskLabelAssignSerializer(serializers.Serializer):
+    """Serializer for assigning/removing labels to/from a task."""
+    label_ids = serializers.ListField(
+        child=serializers.UUIDField(),
+        min_length=1,
+        help_text='List of label UUIDs to assign or remove.'
+    )

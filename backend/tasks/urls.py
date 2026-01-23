@@ -1,8 +1,9 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from tasks.views import TaskViewSet, TaskCommentViewSet, TaskAttachmentViewSet
+from tasks.views import TaskViewSet, TaskCommentViewSet, TaskAttachmentViewSet, TaskLabelViewSet
 
 router = DefaultRouter()
+router.register('labels', TaskLabelViewSet, basename='task-label')
 router.register('', TaskViewSet, basename='task')
 
 comment_list = TaskCommentViewSet.as_view({

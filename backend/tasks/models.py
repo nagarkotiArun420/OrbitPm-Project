@@ -5,10 +5,67 @@ from django.conf import settings
 from django.utils.text import slugify
 from django.utils import timezone
 from django.core.exceptions import ValidationError
+from django.core.validators import RegexValidator
 from projects.models import Project
 from tasks.constants import TaskStatus, TaskPriority
 from tasks.validators import validate_hours_non_negative
 from tasks.managers import TaskManager, TaskCommentManager
+
+
+class TaskLabel(models.Model):
+    """
+    Reusable label/tag for categorizing tasks within a project scope.
+    Labels are unique per project (name + project combination).
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=50)
+    slug = models.SlugField(max_length=60, blank=True)
+    color = models.CharField(
+        max_length=7,
+        default='#6366f1',
+        validators=[RegexValidator(
+            regex=r'^#[0-9A-Fa-f]{6}$',
+            message='Color must be a valid hex color code (e.g. #ff5733).'
+        )],
+        help_text='Hex color code for the label badge.'
+    )
+    description = models.TextField(blank=True, default='')
+    project = models.ForeignKey(
+        Project,
+        on_delete=models.CASCADE,
+        related_name='task_labels',
+        db_index=True
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['name']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['project', 'slug'],
+                name='unique_label_slug_per_project'
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['project', 'name'], name='label_project_name_idx'),
+        ]
+
+    def __str__(self):
+        return f"{self.name} ({self.project.title})"
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            base_slug = slugify(self.name)
+            slug = base_slug
+            counter = 1
+            while TaskLabel.objects.filter(
+                project=self.project, slug=slug
+            ).exclude(pk=self.pk).exists():
+                slug = f"{base_slug}-{counter}"
+                counter += 1
+            self.slug = slug
+        self.full_clean()
+        super().save(*args, **kwargs)
 
 
 class Task(models.Model):
@@ -95,6 +152,13 @@ class Task(models.Model):
     is_archived = models.BooleanField(default=False, db_index=True)
     archived_at = models.DateTimeField(blank=True, null=True, db_index=True)
     
+    # Labels (many-to-many)
+    labels = models.ManyToManyField(
+        'TaskLabel',
+        related_name='tasks',
+        blank=True
+    )
+
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)

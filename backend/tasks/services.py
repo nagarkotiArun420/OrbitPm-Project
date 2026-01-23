@@ -806,3 +806,187 @@ def generate_upcoming_deadline_notifications(days=None, queryset=None, reference
             )
 
     return notifications
+
+
+# ──────────────────────────────────────────────────────────────
+# Task Label Services
+# ──────────────────────────────────────────────────────────────
+
+def check_label_manage_permission(user, project):
+    """
+    Check if a user can create/update/delete labels in a project.
+    ADMIN: full access
+    MANAGER: only in managed/created projects
+    Others: denied
+    """
+    from accounts.models import User as UserModel
+    if not user or not user.is_authenticated:
+        raise ValidationError("Authentication is required.")
+    if user.role == UserModel.Roles.ADMIN:
+        return True
+    if user.role == UserModel.Roles.MANAGER:
+        if project.manager == user or project.created_by == user:
+            return True
+        raise ValidationError("Managers can only manage labels in their own projects.")
+    raise ValidationError("You do not have permission to manage labels.")
+
+
+def check_label_assign_permission(user, task):
+    """
+    Check if a user can assign/remove labels on a task.
+    ADMIN: full access
+    MANAGER: managed/created projects
+    DEVELOPER: assigned tasks only
+    CLIENT: denied
+    """
+    from accounts.models import User as UserModel
+    if not user or not user.is_authenticated:
+        raise ValidationError("Authentication is required.")
+    if user.role == UserModel.Roles.ADMIN:
+        return True
+    if user.role == UserModel.Roles.MANAGER:
+        if task.project.manager == user or task.project.created_by == user:
+            return True
+        raise ValidationError("Managers can only assign labels in their own projects.")
+    if user.role == UserModel.Roles.DEVELOPER:
+        if task.assigned_to == user:
+            return True
+        raise ValidationError("Developers can only assign labels to tasks assigned to them.")
+    raise ValidationError("You do not have permission to assign labels.")
+
+
+@transaction.atomic
+def create_label(project, name, actor, request=None, **kwargs):
+    """Create a new TaskLabel within a project scope."""
+    check_label_manage_permission(actor, project)
+
+    from tasks.models import TaskLabel
+    label = TaskLabel(project=project, name=name, **kwargs)
+    label.save()
+
+    log_task_activity(
+        actor=actor,
+        task=None,
+        action_type=ActionType.CREATED,
+        description=f"Label '{label.name}' was created in project '{project.title}'.",
+        metadata={'label_id': str(label.id), 'project_id': str(project.id)},
+        request=request,
+    )
+    return label
+
+
+@transaction.atomic
+def update_label(label, actor, request=None, **validated_data):
+    """Update an existing TaskLabel."""
+    check_label_manage_permission(actor, label.project)
+
+    old_name = label.name
+    for field, value in validated_data.items():
+        setattr(label, field, value)
+
+    # Regenerate slug if name changed
+    if 'name' in validated_data and validated_data['name'] != old_name:
+        label.slug = ''  # force regeneration
+
+    label.save()
+
+    log_task_activity(
+        actor=actor,
+        task=None,
+        action_type=ActionType.UPDATED,
+        description=f"Label '{label.name}' was updated in project '{label.project.title}'.",
+        metadata={'label_id': str(label.id)},
+        request=request,
+    )
+    return label
+
+
+@transaction.atomic
+def delete_label(label, actor, request=None):
+    """Delete a TaskLabel and remove it from all tasks."""
+    check_label_manage_permission(actor, label.project)
+
+    label_name = label.name
+    project_title = label.project.title
+    label_id = str(label.id)
+
+    label.delete()
+
+    log_task_activity(
+        actor=actor,
+        task=None,
+        action_type=ActionType.DELETED,
+        description=f"Label '{label_name}' was deleted from project '{project_title}'.",
+        metadata={'label_id': label_id},
+        request=request,
+    )
+
+
+@transaction.atomic
+def assign_labels_to_task(task, label_ids, actor, request=None):
+    """
+    Assign one or more labels to a task.
+    Validates: task not archived/deleted, labels belong to same project,
+    no duplicate assignments.
+    """
+    check_label_assign_permission(actor, task)
+
+    if task.is_deleted:
+        raise ValidationError("Cannot assign labels to a deleted task.")
+    if task.is_archived:
+        raise ValidationError("Cannot assign labels to an archived task.")
+
+    from tasks.models import TaskLabel
+    labels = TaskLabel.objects.filter(id__in=label_ids, project=task.project)
+    if labels.count() != len(label_ids):
+        raise ValidationError("One or more labels do not exist or do not belong to this task's project.")
+
+    # Filter out already-assigned labels
+    existing = set(task.labels.filter(id__in=label_ids).values_list('id', flat=True))
+    new_labels = [l for l in labels if l.id not in existing]
+
+    if not new_labels:
+        raise ValidationError("All specified labels are already assigned to this task.")
+
+    task.labels.add(*new_labels)
+
+    label_names = [l.name for l in new_labels]
+    log_task_activity(
+        actor=actor,
+        task=task,
+        action_type=ActionType.LABEL_ASSIGNED,
+        description=f"Labels {label_names} assigned to task '{task.title}'.",
+        metadata={'label_ids': [str(l.id) for l in new_labels]},
+        request=request,
+    )
+    return task
+
+
+@transaction.atomic
+def remove_labels_from_task(task, label_ids, actor, request=None):
+    """Remove one or more labels from a task."""
+    check_label_assign_permission(actor, task)
+
+    if task.is_deleted:
+        raise ValidationError("Cannot remove labels from a deleted task.")
+    if task.is_archived:
+        raise ValidationError("Cannot remove labels from an archived task.")
+
+    from tasks.models import TaskLabel
+    labels = TaskLabel.objects.filter(id__in=label_ids)
+    assigned = task.labels.filter(id__in=label_ids)
+    if assigned.count() != len(label_ids):
+        raise ValidationError("One or more labels are not assigned to this task.")
+
+    task.labels.remove(*assigned)
+
+    label_names = list(assigned.values_list('name', flat=True))
+    log_task_activity(
+        actor=actor,
+        task=task,
+        action_type=ActionType.LABEL_REMOVED,
+        description=f"Labels {label_names} removed from task '{task.title}'.",
+        metadata={'label_ids': [str(lid) for lid in label_ids]},
+        request=request,
+    )
+    return task

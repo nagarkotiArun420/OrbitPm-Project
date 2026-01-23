@@ -12,7 +12,7 @@ def _get_optimized_base_queryset(action='detail'):
         return Task.objects.select_related(
             'project',
             'assigned_to',
-        ).defer('description')
+        ).prefetch_related('labels').defer('description')
 
     return Task.objects.select_related(
         'project',
@@ -23,6 +23,7 @@ def _get_optimized_base_queryset(action='detail'):
         'assigned_by',
     ).prefetch_related(
         'project__team_members',
+        'labels',
     )
 
 
