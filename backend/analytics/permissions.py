@@ -1,12 +1,13 @@
 from rest_framework import permissions
+from accounts.models import User
 
 class CanAccessAnalytics(permissions.BasePermission):
     """
-    Limits high-level system analytics views to internal company staff.
+    Allows authenticated OrbitPM users to access analytics scoped by selectors.
     """
     def has_permission(self, request, view):
         return (
             request.user and 
             request.user.is_authenticated and 
-            request.user.role in ['ADMIN', 'MANAGER', 'DEVELOPER']
+            request.user.role in User.Roles.values
         )
