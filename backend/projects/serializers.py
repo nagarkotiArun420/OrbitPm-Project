@@ -1,5 +1,6 @@
 from rest_framework import serializers
-from projects.models import Project
+from projects.models import Project, ProjectInvitation
+from projects.constants import ProjectMemberRole
 from accounts.serializers import UserMinSerializer
 from django.contrib.auth import get_user_model
 
@@ -151,3 +152,61 @@ class ProjectMemberSerializer(serializers.ModelSerializer):
                 })
 
         return attrs
+
+
+class ProjectInvitationSerializer(serializers.ModelSerializer):
+    """
+    Read serializer for project invitations with lightweight user/project context.
+    """
+    invited_user = UserMinSerializer(read_only=True)
+    invited_by = UserMinSerializer(read_only=True)
+    project_slug = serializers.CharField(source='project.slug', read_only=True)
+    project_title = serializers.CharField(source='project.title', read_only=True)
+    is_expired = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model = ProjectInvitation
+        fields = (
+            'id', 'project_slug', 'project_title',
+            'invited_user', 'invited_by',
+            'role', 'status', 'token',
+            'expires_at', 'accepted_at', 'created_at',
+            'is_expired',
+        )
+        read_only_fields = fields
+
+
+class ProjectInvitationCreateSerializer(serializers.Serializer):
+    """
+    Input serializer for inviting an existing user to a project.
+    """
+    invited_user_id = serializers.UUIDField()
+    role = serializers.ChoiceField(
+        choices=ProjectMemberRole.choices,
+        default=ProjectMemberRole.DEVELOPER,
+    )
+    expires_at = serializers.DateTimeField(required=False)
+
+    def validate_invited_user_id(self, value):
+        try:
+            user = User.objects.get(id=value)
+        except User.DoesNotExist:
+            raise serializers.ValidationError("User with this ID does not exist.")
+
+        if not user.is_active:
+            raise serializers.ValidationError("Inactive users cannot receive project invitations.")
+
+        return value
+
+    def validate_expires_at(self, value):
+        from django.utils import timezone
+        if value <= timezone.now():
+            raise serializers.ValidationError("Invitation expiry must be in the future.")
+        return value
+
+
+class ProjectInvitationActionSerializer(serializers.Serializer):
+    """
+    Optional token payload for accept/decline actions.
+    """
+    token = serializers.CharField(required=False, allow_blank=False)

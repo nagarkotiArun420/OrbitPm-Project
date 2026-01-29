@@ -1,6 +1,13 @@
+from datetime import timedelta
+
+from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import transaction
-from projects.models import Project, ProjectMember
-from projects.constants import ProjectMemberRole
+from django.utils import timezone
+
+from accounts.models import User
+from projects.models import Project, ProjectMember, ProjectInvitation
+from projects.constants import ProjectInvitationStatus, ProjectMemberRole
 from common.services import log_project_activity, log_activity
 from common.constants import ActionType, TargetType
 from common.utils import get_model_changes
@@ -222,5 +229,313 @@ def remove_project_member(member, removed_by=None, request=None):
     )
 
     member.delete()
+
+
+def get_invitation_expiry():
+    """
+    Returns the default project invitation expiry timestamp.
+    """
+    days = getattr(settings, 'PROJECT_INVITATION_EXPIRY_DAYS', 7)
+    return timezone.now() + timedelta(days=days)
+
+
+def _expire_invitation_if_needed(invitation, request=None):
+    if not invitation.is_expired:
+        return False
+
+    invitation.status = ProjectInvitationStatus.EXPIRED
+    invitation.save(update_fields=['status'])
+    log_activity(
+        actor=None,
+        action_type=ActionType.INVITATION_EXPIRED,
+        target_type=TargetType.PROJECT_INVITATION,
+        target_id=invitation.id,
+        target_repr=f"{invitation.invited_user.email} -> {invitation.project.title}",
+        description=f"Invitation for {invitation.invited_user.email} to project '{invitation.project.title}' expired.",
+        metadata={
+            'project_id': str(invitation.project_id),
+            'invited_user_id': str(invitation.invited_user_id),
+        },
+        request=request,
+    )
+    return True
+
+
+def _sync_membership_for_invitation(invitation):
+    member, _ = ProjectMember.objects.update_or_create(
+        project=invitation.project,
+        user=invitation.invited_user,
+        defaults={
+            'role': invitation.role,
+            'invited_by': invitation.invited_by,
+            'is_active': True,
+        },
+    )
+
+    if invitation.role in (ProjectMemberRole.DEVELOPER, ProjectMemberRole.VIEWER):
+        invitation.project.team_members.add(invitation.invited_user)
+    else:
+        invitation.project.team_members.remove(invitation.invited_user)
+
+    return member
+
+
+def _validate_invitation_token(invitation, token=None):
+    if token and token != invitation.token:
+        raise ValidationError({'token': 'Invalid invitation token.'})
+
+
+@transaction.atomic
+def create_invitation(project, invited_user, role, invited_by, request=None, expires_at=None):
+    """
+    Create a project invitation with duplicate/member validation,
+    activity logging, and in-app notification delivery.
+    """
+    role = role or ProjectMemberRole.DEVELOPER
+
+    if not invited_user.is_active:
+        raise ValidationError({'invited_user_id': 'Inactive users cannot receive project invitations.'})
+
+    if ProjectMember.objects.filter(project=project, user=invited_user).exists():
+        raise ValidationError({'invited_user_id': 'Existing project members cannot be reinvited.'})
+
+    ProjectInvitation.objects.filter(
+        project=project,
+        invited_user=invited_user,
+        status=ProjectInvitationStatus.PENDING,
+        expires_at__lte=timezone.now(),
+    ).update(status=ProjectInvitationStatus.EXPIRED)
+
+    if ProjectInvitation.objects.filter(
+        project=project,
+        invited_user=invited_user,
+        status=ProjectInvitationStatus.PENDING,
+    ).exists():
+        raise ValidationError({'invited_user_id': 'A pending invitation already exists for this user.'})
+
+    invitation = ProjectInvitation(
+        project=project,
+        invited_user=invited_user,
+        invited_by=invited_by,
+        role=role,
+        expires_at=expires_at or get_invitation_expiry(),
+    )
+    invitation.save()
+
+    log_activity(
+        actor=invited_by,
+        action_type=ActionType.INVITATION_SENT,
+        target_type=TargetType.PROJECT_INVITATION,
+        target_id=invitation.id,
+        target_repr=f"{invited_user.email} -> {project.title}",
+        description=f"{invited_user.email} was invited to project '{project.title}' as {role}.",
+        metadata={
+            'project_id': str(project.id),
+            'invited_user_id': str(invited_user.id),
+            'role': role,
+            'expires_at': invitation.expires_at.isoformat(),
+        },
+        request=request,
+    )
+
+    send_in_app_notification(
+        recipient=invited_user,
+        title='Project Invitation',
+        message=f"You have been invited to project '{project.title}' as {invitation.get_role_display()}.",
+        notification_type=NotificationType.PROJECT_INVITATION_SENT,
+        actor=invited_by,
+        metadata={
+            'project_id': str(project.id),
+            'project_title': project.title,
+            'invitation_id': str(invitation.id),
+            'role': role,
+            'expires_at': invitation.expires_at.isoformat(),
+        },
+    )
+
+    return invitation
+
+
+def accept_invitation(invitation, actor, token=None, request=None):
+    """
+    Accept an invitation and convert it into an active ProjectMember row.
+    """
+    expired = False
+    with transaction.atomic():
+        invitation = ProjectInvitation.objects.select_for_update().select_related(
+            'project',
+            'invited_user',
+            'invited_by',
+        ).get(pk=invitation.pk)
+        _validate_invitation_token(invitation, token)
+
+        if actor.role != User.Roles.ADMIN and invitation.invited_user_id != actor.id:
+            raise ValidationError({'invitation': 'Only the invited user can accept this invitation.'})
+
+        if invitation.status != ProjectInvitationStatus.PENDING:
+            raise ValidationError({'status': f'Only pending invitations can be accepted. Current status: {invitation.status}.'})
+
+        if _expire_invitation_if_needed(invitation, request=request):
+            expired = True
+        else:
+            member = _sync_membership_for_invitation(invitation)
+            invitation.status = ProjectInvitationStatus.ACCEPTED
+            invitation.accepted_at = timezone.now()
+            invitation.save(update_fields=['status', 'accepted_at'])
+
+            log_activity(
+                actor=actor,
+                action_type=ActionType.INVITATION_ACCEPTED,
+                target_type=TargetType.PROJECT_INVITATION,
+                target_id=invitation.id,
+                target_repr=f"{invitation.invited_user.email} -> {invitation.project.title}",
+                description=f"{invitation.invited_user.email} accepted the invitation to project '{invitation.project.title}'.",
+                metadata={
+                    'project_id': str(invitation.project_id),
+                    'member_id': str(member.id),
+                    'role': invitation.role,
+                },
+                request=request,
+            )
+
+            if invitation.invited_by:
+                send_in_app_notification(
+                    recipient=invitation.invited_by,
+                    title='Project Invitation Accepted',
+                    message=f"{invitation.invited_user.full_name} accepted the invitation to '{invitation.project.title}'.",
+                    notification_type=NotificationType.PROJECT_INVITATION_ACCEPTED,
+                    actor=actor,
+                    metadata={
+                        'project_id': str(invitation.project_id),
+                        'project_title': invitation.project.title,
+                        'invitation_id': str(invitation.id),
+                        'member_id': str(member.id),
+                    },
+                )
+
+    if expired:
+        raise ValidationError({'status': 'Expired invitations cannot be accepted.'})
+
+    return invitation
+
+
+def decline_invitation(invitation, actor, token=None, request=None):
+    """
+    Decline a pending invitation.
+    """
+    expired = False
+    with transaction.atomic():
+        invitation = ProjectInvitation.objects.select_for_update().select_related(
+            'project',
+            'invited_user',
+            'invited_by',
+        ).get(pk=invitation.pk)
+        _validate_invitation_token(invitation, token)
+
+        if actor.role != User.Roles.ADMIN and invitation.invited_user_id != actor.id:
+            raise ValidationError({'invitation': 'Only the invited user can decline this invitation.'})
+
+        if invitation.status != ProjectInvitationStatus.PENDING:
+            raise ValidationError({'status': f'Only pending invitations can be declined. Current status: {invitation.status}.'})
+
+        if _expire_invitation_if_needed(invitation, request=request):
+            expired = True
+        else:
+            invitation.status = ProjectInvitationStatus.DECLINED
+            invitation.save(update_fields=['status'])
+
+            log_activity(
+                actor=actor,
+                action_type=ActionType.INVITATION_DECLINED,
+                target_type=TargetType.PROJECT_INVITATION,
+                target_id=invitation.id,
+                target_repr=f"{invitation.invited_user.email} -> {invitation.project.title}",
+                description=f"{invitation.invited_user.email} declined the invitation to project '{invitation.project.title}'.",
+                metadata={
+                    'project_id': str(invitation.project_id),
+                    'invited_user_id': str(invitation.invited_user_id),
+                    'role': invitation.role,
+                },
+                request=request,
+            )
+
+            if invitation.invited_by:
+                send_in_app_notification(
+                    recipient=invitation.invited_by,
+                    title='Project Invitation Declined',
+                    message=f"{invitation.invited_user.full_name} declined the invitation to '{invitation.project.title}'.",
+                    notification_type=NotificationType.PROJECT_INVITATION_DECLINED,
+                    actor=actor,
+                    metadata={
+                        'project_id': str(invitation.project_id),
+                        'project_title': invitation.project.title,
+                        'invitation_id': str(invitation.id),
+                    },
+                )
+
+    if expired:
+        raise ValidationError({'status': 'Expired invitations cannot be declined.'})
+
+    return invitation
+
+
+@transaction.atomic
+def revoke_invitation(invitation, actor, request=None):
+    """
+    Revoke a pending invitation by marking it expired.
+    """
+    invitation = ProjectInvitation.objects.select_for_update().select_related(
+        'project',
+        'invited_user',
+    ).get(pk=invitation.pk)
+
+    if invitation.status != ProjectInvitationStatus.PENDING:
+        raise ValidationError({'status': f'Only pending invitations can be revoked. Current status: {invitation.status}.'})
+
+    invitation.status = ProjectInvitationStatus.EXPIRED
+    invitation.save(update_fields=['status'])
+
+    log_activity(
+        actor=actor,
+        action_type=ActionType.INVITATION_REVOKED,
+        target_type=TargetType.PROJECT_INVITATION,
+        target_id=invitation.id,
+        target_repr=f"{invitation.invited_user.email} -> {invitation.project.title}",
+        description=f"Invitation for {invitation.invited_user.email} to project '{invitation.project.title}' was revoked.",
+        metadata={
+            'project_id': str(invitation.project_id),
+            'invited_user_id': str(invitation.invited_user_id),
+            'role': invitation.role,
+        },
+        request=request,
+    )
+
+    send_in_app_notification(
+        recipient=invitation.invited_user,
+        title='Project Invitation Revoked',
+        message=f"Your invitation to project '{invitation.project.title}' has been revoked.",
+        notification_type=NotificationType.PROJECT_INVITATION_REVOKED,
+        actor=actor,
+        metadata={
+            'project_id': str(invitation.project_id),
+            'project_title': invitation.project.title,
+            'invitation_id': str(invitation.id),
+        },
+    )
+
+    return invitation
+
+
+@transaction.atomic
+def expire_invitation(invitation, request=None):
+    """
+    Expire a pending invitation if its expiry timestamp has passed.
+    """
+    invitation = ProjectInvitation.objects.select_for_update().select_related(
+        'project',
+        'invited_user',
+    ).get(pk=invitation.pk)
+    _expire_invitation_if_needed(invitation, request=request)
+    return invitation
 
 

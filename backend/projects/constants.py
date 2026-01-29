@@ -18,3 +18,10 @@ class ProjectMemberRole(models.TextChoices):
     DEVELOPER = 'DEVELOPER', 'Developer'
     CLIENT = 'CLIENT', 'Client'
     VIEWER = 'VIEWER', 'Viewer'
+
+
+class ProjectInvitationStatus(models.TextChoices):
+    PENDING = 'PENDING', 'Pending'
+    ACCEPTED = 'ACCEPTED', 'Accepted'
+    DECLINED = 'DECLINED', 'Declined'
+    EXPIRED = 'EXPIRED', 'Expired'

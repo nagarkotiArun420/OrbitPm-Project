@@ -1,22 +1,42 @@
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db.models import Q
 from rest_framework import viewsets, permissions, filters, status
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
 from django_filters.rest_framework import DjangoFilterBackend
 from django.contrib.auth import get_user_model
-from projects.permissions import IsAdmin, IsProjectManager, IsAssignedDeveloper, IsProjectClient, IsMemberManagerOrReadOnly
+from common.responses import success_response
+from projects.permissions import (
+    IsAdmin,
+    IsProjectManager,
+    IsAssignedDeveloper,
+    IsProjectClient,
+    IsInvitationManagerOrReadOnly,
+    IsMemberManagerOrReadOnly,
+)
 from projects.selectors import get_authorized_projects
 from projects.serializers import (
     ProjectListSerializer,
     ProjectDetailSerializer,
     ProjectCreateSerializer,
     ProjectUpdateSerializer,
-    ProjectMemberSerializer
+    ProjectInvitationActionSerializer,
+    ProjectInvitationCreateSerializer,
+    ProjectInvitationSerializer,
+    ProjectMemberSerializer,
 )
 from projects.services import (
     create_project, update_project, delete_project,
-    add_project_member, update_member_role, remove_project_member
+    accept_invitation,
+    add_project_member,
+    create_invitation,
+    decline_invitation,
+    remove_project_member,
+    revoke_invitation,
+    update_member_role,
 )
-from projects.models import ProjectMember
+from projects.models import ProjectInvitation, ProjectMember
 
 User = get_user_model()
 
@@ -196,3 +216,147 @@ class ProjectMemberViewSet(viewsets.ModelViewSet):
         )
 
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class ProjectInvitationViewSet(viewsets.ModelViewSet):
+    """
+    Nested project invitation workflow API.
+    Supports invite, list, accept, decline, and revoke flows.
+    """
+    serializer_class = ProjectInvitationSerializer
+    permission_classes = [permissions.IsAuthenticated, IsInvitationManagerOrReadOnly]
+    http_method_names = ['get', 'post', 'delete', 'head', 'options']
+
+    def get_project(self):
+        return get_object_or_404(
+            get_authorized_projects(self.request.user, action='detail'),
+            slug=self.kwargs['project_slug']
+        )
+
+    def get_queryset(self):
+        base_queryset = ProjectInvitation.objects.filter(
+            project__slug=self.kwargs['project_slug']
+        ).select_related(
+            'project',
+            'invited_user',
+            'invited_by',
+        )
+
+        authorized_projects = get_authorized_projects(self.request.user, action='detail')
+        visibility_filter = Q(project__in=authorized_projects)
+
+        if self.action in ('retrieve', 'accept', 'decline'):
+            visibility_filter |= Q(invited_user=self.request.user)
+
+        return base_queryset.filter(visibility_filter).distinct()
+
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return ProjectInvitationCreateSerializer
+        if self.action in ('accept', 'decline'):
+            return ProjectInvitationActionSerializer
+        return ProjectInvitationSerializer
+
+    def _validation_error_detail(self, exc):
+        return exc.message_dict if hasattr(exc, 'message_dict') else exc.messages
+
+    def create(self, request, *args, **kwargs):
+        project = self.get_project()
+        self.check_object_permissions(request, project)
+
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        invited_user = get_object_or_404(
+            User,
+            id=serializer.validated_data['invited_user_id'],
+        )
+        try:
+            invitation = create_invitation(
+                project=project,
+                invited_user=invited_user,
+                role=serializer.validated_data.get('role'),
+                expires_at=serializer.validated_data.get('expires_at'),
+                invited_by=request.user,
+                request=request,
+            )
+        except DjangoValidationError as exc:
+            raise ValidationError(self._validation_error_detail(exc))
+
+        return success_response(
+            data=ProjectInvitationSerializer(invitation).data,
+            message='Project invitation created successfully',
+            status_code=status.HTTP_201_CREATED,
+        )
+
+    def accept(self, request, *args, **kwargs):
+        invitation = self.get_object()
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            invitation = accept_invitation(
+                invitation=invitation,
+                actor=request.user,
+                token=serializer.validated_data.get('token'),
+                request=request,
+            )
+        except DjangoValidationError as exc:
+            raise ValidationError(self._validation_error_detail(exc))
+
+        return success_response(
+            data=ProjectInvitationSerializer(invitation).data,
+            message='Project invitation accepted successfully',
+        )
+
+    def decline(self, request, *args, **kwargs):
+        invitation = self.get_object()
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            invitation = decline_invitation(
+                invitation=invitation,
+                actor=request.user,
+                token=serializer.validated_data.get('token'),
+                request=request,
+            )
+        except DjangoValidationError as exc:
+            raise ValidationError(self._validation_error_detail(exc))
+
+        return success_response(
+            data=ProjectInvitationSerializer(invitation).data,
+            message='Project invitation declined successfully',
+        )
+
+    def revoke(self, request, *args, **kwargs):
+        invitation = self.get_object()
+        try:
+            invitation = revoke_invitation(
+                invitation=invitation,
+                actor=request.user,
+                request=request,
+            )
+        except DjangoValidationError as exc:
+            raise ValidationError(self._validation_error_detail(exc))
+
+        return success_response(
+            data=ProjectInvitationSerializer(invitation).data,
+            message='Project invitation revoked successfully',
+        )
+
+    def destroy(self, request, *args, **kwargs):
+        invitation = self.get_object()
+        try:
+            invitation = revoke_invitation(
+                invitation=invitation,
+                actor=request.user,
+                request=request,
+            )
+        except DjangoValidationError as exc:
+            raise ValidationError(self._validation_error_detail(exc))
+
+        return success_response(
+            data=ProjectInvitationSerializer(invitation).data,
+            message='Project invitation revoked successfully',
+        )

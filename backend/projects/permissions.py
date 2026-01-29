@@ -133,3 +133,50 @@ class IsMemberManagerOrReadOnly(permissions.BasePermission):
 
         return False
 
+
+class IsInvitationManagerOrReadOnly(permissions.BasePermission):
+    """
+    Permission for project invitation endpoints.
+    ADMIN: full management.
+    MANAGER: manage invitations in projects they own.
+    DEVELOPER/CLIENT: read-only, plus accepting/declining their own invitation.
+    """
+    managed_actions = {'create', 'destroy', 'revoke'}
+    invitee_actions = {'accept', 'decline'}
+
+    def has_permission(self, request, view):
+        if not (request.user and request.user.is_authenticated):
+            return False
+
+        action = getattr(view, 'action', None)
+        if request.method in permissions.SAFE_METHODS:
+            return True
+        if action in self.invitee_actions:
+            return True
+        return request.user.role in (User.Roles.ADMIN, User.Roles.MANAGER)
+
+    def has_object_permission(self, request, view, obj):
+        user = request.user
+        if not user or not user.is_authenticated:
+            return False
+
+        if user.role == User.Roles.ADMIN:
+            return True
+
+        action = getattr(view, 'action', None)
+        if action in self.invitee_actions:
+            return obj.invited_user_id == user.id
+
+        project = obj.project if hasattr(obj, 'project') else obj
+        if request.method in permissions.SAFE_METHODS:
+            return (
+                project.manager == user or
+                project.created_by == user or
+                project.client == user or
+                project.team_members.filter(id=user.id).exists()
+            )
+
+        if user.role == User.Roles.MANAGER:
+            return project.manager == user or project.created_by == user
+
+        return False

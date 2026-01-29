@@ -1,5 +1,5 @@
 from django.contrib import admin
-from projects.models import Project, ProjectMember
+from projects.models import Project, ProjectInvitation, ProjectMember
 
 @admin.register(Project)
 class ProjectAdmin(admin.ModelAdmin):
@@ -42,3 +42,21 @@ class ProjectMemberAdmin(admin.ModelAdmin):
     readonly_fields = ('joined_at',)
     ordering = ('-joined_at',)
 
+
+@admin.register(ProjectInvitation)
+class ProjectInvitationAdmin(admin.ModelAdmin):
+    """
+    Admin configuration for ProjectInvitation model.
+    """
+    list_display = (
+        'invited_user', 'project', 'role', 'status',
+        'invited_by', 'expires_at', 'accepted_at', 'created_at'
+    )
+    list_filter = ('status', 'role', 'created_at', 'expires_at')
+    search_fields = (
+        'invited_user__email', 'invited_user__full_name',
+        'project__title', 'token'
+    )
+    autocomplete_fields = ('project', 'invited_user', 'invited_by')
+    readonly_fields = ('token', 'accepted_at', 'created_at')
+    ordering = ('-created_at',)
