@@ -202,6 +202,21 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": (
         "rest_framework.permissions.IsAuthenticated",
     ),
+    "DEFAULT_THROTTLE_CLASSES": (
+        "common.throttling.AnonBurstThrottle",
+        "common.throttling.AnonSustainedThrottle",
+        "common.throttling.UserBurstThrottle",
+        "common.throttling.UserSustainedThrottle",
+    ),
+    "DEFAULT_THROTTLE_RATES": {
+        "anon_burst": "30/min",
+        "anon_sustained": "200/day",
+        "user_burst": "60/min",
+        "user_sustained": "1000/day",
+        "login": "5/min",
+        "register": "10/hour",
+        "write_ops": "30/min",
+    },
     "DEFAULT_PAGINATION_CLASS": "common.pagination.StandardResultsSetPagination",
     "PAGE_SIZE": env_int("DRF_PAGE_SIZE", 10),
     "EXCEPTION_HANDLER": "common.exceptions.global_exception_handler",
@@ -292,6 +307,11 @@ LOGGING = {
     },
     "loggers": {
         "common": {
+            "handlers": ["console", "file", "error_file"],
+            "level": LOG_LEVEL,
+            "propagate": False,
+        },
+        "common.throttling": {
             "handlers": ["console", "file", "error_file"],
             "level": LOG_LEVEL,
             "propagate": False,

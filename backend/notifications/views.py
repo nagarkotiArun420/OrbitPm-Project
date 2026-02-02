@@ -2,6 +2,7 @@ from rest_framework import permissions, status, viewsets
 from rest_framework.views import APIView
 from rest_framework.decorators import action
 from common.responses import success_response
+from common.throttling import WriteOperationThrottle, UserBurstThrottle, UserSustainedThrottle
 from notifications.models import Notification
 from notifications.serializers import NotificationPreferenceSerializer, NotificationSerializer
 from notifications.permissions import IsNotificationRecipient
@@ -14,6 +15,7 @@ class NotificationViewSet(viewsets.ModelViewSet):
     queryset = Notification.objects.all().order_by('-created_at')
     serializer_class = NotificationSerializer
     permission_classes = [permissions.IsAuthenticated, IsNotificationRecipient]
+    throttle_classes = [WriteOperationThrottle, UserBurstThrottle, UserSustainedThrottle]
 
     def get_queryset(self):
         # Users only see notifications sent to them

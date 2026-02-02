@@ -127,6 +127,13 @@ def global_exception_handler(exc, context):
                 log_context.get('path', '?'),
                 extra=log_context,
             )
+        elif status_code == status.HTTP_429_TOO_MANY_REQUESTS:
+            message = 'Request rate limit exceeded. Please slow down and try again later.'
+            logger.warning(
+                "Rate limit exceeded at %s user=%s",
+                log_context.get('path', '?'), log_context.get('user', 'anonymous'),
+                extra=log_context,
+            )
         elif status_code == 422:
             message = str(exc.detail) if hasattr(exc, 'detail') else 'Business validation failed'
             logger.info(

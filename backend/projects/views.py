@@ -7,6 +7,7 @@ from django.shortcuts import get_object_or_404
 from django_filters.rest_framework import DjangoFilterBackend
 from django.contrib.auth import get_user_model
 from common.responses import success_response
+from common.throttling import WriteOperationThrottle, UserBurstThrottle, UserSustainedThrottle
 from projects.permissions import (
     IsAdmin,
     IsProjectManager,
@@ -50,6 +51,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
         permissions.IsAuthenticated,
         (IsAdmin | IsProjectManager | IsAssignedDeveloper | IsProjectClient)
     ]
+    throttle_classes = [WriteOperationThrottle, UserBurstThrottle, UserSustainedThrottle]
     
     # Filter and search backends configuration
     filter_backends = (DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter)
@@ -115,6 +117,7 @@ class ProjectMemberViewSet(viewsets.ModelViewSet):
     """
     serializer_class = ProjectMemberSerializer
     permission_classes = [permissions.IsAuthenticated, IsMemberManagerOrReadOnly]
+    throttle_classes = [WriteOperationThrottle, UserBurstThrottle, UserSustainedThrottle]
     http_method_names = ['get', 'post', 'patch', 'delete', 'head', 'options']
 
     def get_project(self):
@@ -225,6 +228,7 @@ class ProjectInvitationViewSet(viewsets.ModelViewSet):
     """
     serializer_class = ProjectInvitationSerializer
     permission_classes = [permissions.IsAuthenticated, IsInvitationManagerOrReadOnly]
+    throttle_classes = [WriteOperationThrottle, UserBurstThrottle, UserSustainedThrottle]
     http_method_names = ['get', 'post', 'delete', 'head', 'options']
 
     def get_project(self):

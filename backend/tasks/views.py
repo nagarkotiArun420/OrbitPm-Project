@@ -7,6 +7,7 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 
 from common.responses import success_response
+from common.throttling import WriteOperationThrottle, UserBurstThrottle, UserSustainedThrottle
 from tasks.filters import TaskFilter
 from tasks.models import Task, TaskAttachment, TaskComment, TaskLabel
 from tasks.permissions import (
@@ -53,6 +54,7 @@ class TaskViewSet(viewsets.ModelViewSet):
     """
     lookup_field = 'slug'
     permission_classes = [permissions.IsAuthenticated, HasTaskPermission]
+    throttle_classes = [WriteOperationThrottle, UserBurstThrottle, UserSustainedThrottle]
     filter_backends = (DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter)
     filterset_class = TaskFilter
     search_fields = ('title', 'description', 'project__title')
@@ -201,6 +203,7 @@ class TaskCommentViewSet(viewsets.ModelViewSet):
     """
     serializer_class = TaskCommentSerializer
     permission_classes = [permissions.IsAuthenticated, HasTaskCommentPermission]
+    throttle_classes = [WriteOperationThrottle, UserBurstThrottle, UserSustainedThrottle]
 
     def get_task(self):
         return get_object_or_404(
@@ -268,6 +271,7 @@ class TaskAttachmentViewSet(viewsets.ModelViewSet):
     """
     serializer_class = TaskAttachmentSerializer
     permission_classes = [permissions.IsAuthenticated, HasTaskAttachmentPermission]
+    throttle_classes = [WriteOperationThrottle, UserBurstThrottle, UserSustainedThrottle]
     http_method_names = ['get', 'post', 'delete', 'head', 'options']
 
     def get_task(self):
@@ -321,6 +325,7 @@ class TaskLabelViewSet(viewsets.ModelViewSet):
     """
     lookup_field = 'slug'
     permission_classes = [permissions.IsAuthenticated, HasTaskLabelPermission]
+    throttle_classes = [WriteOperationThrottle, UserBurstThrottle, UserSustainedThrottle]
     filter_backends = (DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter)
     search_fields = ('name', 'description')
     ordering_fields = ('name', 'created_at')

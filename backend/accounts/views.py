@@ -1,3 +1,4 @@
+import logging
 from rest_framework import status, permissions
 from rest_framework.views import APIView
 from rest_framework.parsers import MultiPartParser, FormParser
@@ -8,6 +9,8 @@ from django.contrib.auth import get_user_model
 from common.services import log_activity
 from common.constants import ActionType, TargetType
 from common.responses import error_response, success_response
+from common.throttling import LoginRateThrottle, RegisterRateThrottle
+from common.utils import get_client_ip
 
 from accounts.serializers import (
     RegisterSerializer, 
@@ -16,12 +19,14 @@ from accounts.serializers import (
 )
 
 User = get_user_model()
+logger = logging.getLogger('accounts')
 
 class CustomTokenObtainPairView(TokenObtainPairView):
     """
     Endpoint for user login. Returns JWT access & refresh tokens along with user information.
     """
     serializer_class = CustomTokenObtainPairSerializer
+    throttle_classes = [LoginRateThrottle]
 
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -30,6 +35,15 @@ class CustomTokenObtainPairView(TokenObtainPairView):
             serializer.is_valid(raise_exception=True)
         except TokenError as e:
             raise InvalidToken(e.args[0])
+        except Exception as e:
+            # Log failed login attempt
+            email = request.data.get('email', 'unknown')
+            ip = get_client_ip(request)
+            logger.warning(
+                "Failed login attempt for email=%s from IP=%s",
+                email, ip
+            )
+            raise e
 
         user = serializer.user
         
@@ -50,13 +64,14 @@ class CustomTokenRefreshView(TokenRefreshView):
     """
     Endpoint for token refresh.
     """
-    pass
+    throttle_classes = [LoginRateThrottle]
 
 class RegisterView(APIView):
     """
     Endpoint for user registration.
     """
     permission_classes = (permissions.AllowAny,)
+    throttle_classes = [RegisterRateThrottle]
 
     def post(self, request, *args, **kwargs):
         serializer = RegisterSerializer(data=request.data)
