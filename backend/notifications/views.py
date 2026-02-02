@@ -1,9 +1,11 @@
-from rest_framework import viewsets, permissions, status
+from rest_framework import permissions, status, viewsets
+from rest_framework.views import APIView
 from rest_framework.decorators import action
 from common.responses import success_response
 from notifications.models import Notification
-from notifications.serializers import NotificationSerializer
+from notifications.serializers import NotificationPreferenceSerializer, NotificationSerializer
 from notifications.permissions import IsNotificationRecipient
+from notifications.services import get_user_preferences
 
 class NotificationViewSet(viewsets.ModelViewSet):
     """
@@ -28,4 +30,38 @@ class NotificationViewSet(viewsets.ModelViewSet):
         return success_response(
             message='All notifications marked as read',
             status_code=status.HTTP_200_OK
+        )
+
+
+class NotificationPreferenceView(APIView):
+    """
+    Retrieve and update the authenticated user's notification preferences.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        prefs = get_user_preferences(request.user)
+        return success_response(
+            data=NotificationPreferenceSerializer(prefs).data,
+            message='Notification preferences retrieved successfully',
+        )
+
+    def patch(self, request):
+        prefs = get_user_preferences(request.user)
+        serializer = NotificationPreferenceSerializer(prefs, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return success_response(
+            data=serializer.data,
+            message='Notification preferences updated successfully',
+        )
+
+    def put(self, request):
+        prefs = get_user_preferences(request.user)
+        serializer = NotificationPreferenceSerializer(prefs, data=request.data, partial=False)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return success_response(
+            data=serializer.data,
+            message='Notification preferences updated successfully',
         )

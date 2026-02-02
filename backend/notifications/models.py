@@ -41,3 +41,32 @@ class Notification(models.Model):
 
     def __str__(self):
         return f"{self.title} - {self.recipient.email} (Read: {self.is_read})"
+
+
+class NotificationPreference(models.Model):
+    """
+    Per-user notification settings controlling which workflow events
+    generate in-app notifications.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='notification_preferences',
+        db_index=True,
+    )
+
+    task_assignment_enabled = models.BooleanField(default=True)
+    task_comment_enabled = models.BooleanField(default=True)
+    task_deadline_enabled = models.BooleanField(default=True)
+    project_update_enabled = models.BooleanField(default=True)
+    invitation_enabled = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-updated_at']
+
+    def __str__(self):
+        return f"NotificationPreference({self.user.email})"
