@@ -30,6 +30,8 @@ staticfiles/
 
 # Environment Variables
 .env
+.env.local
+config/settings/local_overrides.py
 
 # Virtual Environment
 venv/

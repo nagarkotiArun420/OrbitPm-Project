@@ -151,6 +151,39 @@ OrbitPM/
    ```
    The backend will be live at `http://127.0.0.1:8000/`.
 
+### Backend Configuration Notes
+
+OrbitPM uses split Django settings under `backend/config/settings/`:
+
+- `config.settings.development` is the default for `manage.py`, enables local-safe defaults, and falls back to SQLite if PostgreSQL is not configured.
+- `config.settings.local` layers optional machine-specific overrides on top of development settings. Use `.env.local` or an ignored `config/settings/local_overrides.py` file for values that should never be committed.
+- `config.settings.production` requires `SECRET_KEY`, `ALLOWED_HOSTS`, and PostgreSQL configuration, disables `DEBUG`, uses secure cookie defaults, and prepares static files for hashed `collectstatic` output.
+
+Environment values are loaded from `backend/.env`, then `backend/.env.local` if present. Prefer `DATABASE_URL` for deployments:
+
+```bash
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/orbitpm_db
+```
+
+The split database variables are also supported: `DATABASE_NAME`, `DATABASE_USER`, `DATABASE_PASSWORD`, `DATABASE_HOST`, and `DATABASE_PORT`.
+
+For production preparation, set at minimum:
+
+```bash
+DJANGO_SETTINGS_MODULE=config.settings.production
+SECRET_KEY=<strong unique secret>
+DEBUG=False
+ALLOWED_HOSTS=api.example.com
+DATABASE_URL=postgresql://user:password@host:5432/orbitpm
+CORS_ALLOWED_ORIGINS=https://app.example.com
+CSRF_TRUSTED_ORIGINS=https://app.example.com
+SECURE_SSL_REDIRECT=True
+SESSION_COOKIE_SECURE=True
+CSRF_COOKIE_SECURE=True
+```
+
+Email, JWT lifetimes, trusted origins, static/media roots, upload limits, and logging levels are documented in `backend/.env.example`.
+
 ---
 
 ### ⚛️ Frontend Setup
